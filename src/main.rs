@@ -655,8 +655,13 @@ impl GameState {
     fn default() -> GameState {
         GameState::new("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_owned())
     }
-    fn king_moves(&self, color: Color) -> u64 {
-        match color {
+    fn king_moves(&self, color: Color) -> Vec<Move> {
+        let mut moves: Vec<Move> = vec![];
+        let king_idx = match color {
+            Color::White => self.w_king_idx,
+            Color::Black => self.b_king_idx,
+        };
+        let mut bb = match color {
             Color::White => {
                 self.king_lookup[self.w_king_idx]
                     & !self.masks.black_space
@@ -667,7 +672,18 @@ impl GameState {
                     & !self.masks.white_space
                     & !self.pieces.black_pieces
             }
+        };
+        while bb > 0 {
+            let king_move = bb.trailing_zeros() as usize;
+            moves.push(Move {
+                from: king_idx,
+                to: king_move,
+                piece_color: color,
+                promoted_piece: None,
+            });
+            bb &= bb - 1;
         }
+        moves
     }
     fn knight_moves(&self, color: Color) -> u64 {
         let mut moves: u64 = 0;
@@ -916,11 +932,12 @@ impl GameState {
         moves
     }
     fn moves(self, color: Color) -> Vec<Move> {
-        let move_list: Vec<Move> = vec![];
+        let mut move_list: Vec<Move> = vec![];
         match color {
             Color::White => {
                 if self.masks.white_checkers.count_ones() > 1 {
                     //generate only king moves
+                    move_list = self.king_moves(color);
                 } else {
                 }
             }
