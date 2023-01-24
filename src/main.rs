@@ -52,7 +52,7 @@ pub enum Direction {
 
 // const not_h: u64 = 0x7f7f7f7f7f7f7f7f;
 // const not_a: u64 = 0xfefefefefefefefe;
-pub const horizontal_lookup: [u64; 8] = [
+pub const HORIZONTAL_LOOKUP: [u64; 8] = [
     0xff,
     0xff00,
     0xff0000,
@@ -63,6 +63,10 @@ pub const horizontal_lookup: [u64; 8] = [
     0xff00000000000000,
 ];
 
+const WHITE_QUEENSIDE: u64 = 0xc;
+const WHITE_KINGSIDE: u64 = 0x60;
+const BLACK_QUEENSIDE: u64 = 0xc00000000000000;
+const BLACK_KINGSIDE: u64 = 0x6000000000000000;
 // pub enum MoveType {
 //     Promotion,
 //     EnPassant,
@@ -98,6 +102,8 @@ pub struct Masks {
     black_pinmask: PinMask,
     white_pinned: u64,
     black_pinned: u64,
+    white_king_danger: u64,
+    black_king_danger: u64,
 }
 #[derive(Clone, Copy)]
 pub struct PinMask {
@@ -313,32 +319,13 @@ impl Pieces {
             piece_type_lookup,
         }
     }
-    // fn all_moves(self, color: Color) {
-    //     match color {
-    //         Color::White => {
-    //             for idx in self.w_idx {
-    //                 let piece = self.piece_types[idx].expect("Expected piece but none found");
-    //                 match piece {
-    //                     PieceType::Knight => {
-    //                         let moves = self.knight_moves[idx] & !self.white_pieces;
-    //                     }
-    //                     _ => todo!(),
-    //                 }
-    //             }
-    //         }
-    //         Color::Black => {}
-    //     }
-    // }
-    // fn pseudo_legal_moves(self) {}
-    // fn apply_move(self) {
-    //     //does not check if move is legal since the legal moves have already been generated
-    // }
 }
 struct GameState {
     pieces: Pieces,
     empty: u64,
-    white_castling: (bool, bool), //Queenside, Kingside
+    white_castling: (bool, bool), //Queenside, Kingside (FEN)
     black_castling: (bool, bool),
+    legal_castling: (bool, bool, bool, bool), // Evaluated castling (after analysis)
     active_color: Color,
     halfmoves: usize,
     fullmoves: usize,
@@ -353,26 +340,10 @@ struct GameState {
     masks: Masks,
     w_king_idx: usize,
     b_king_idx: usize,
-    // slide_lookup: HashMap<u64, u64>,
-    // vertical_lookup: Vec<u64>,
-    // a1h8_lookup: Vec<u64>,
-    // h1a8_lookup: Vec<u64>,
-    // we_lookup: Vec<u64>,
-    // nw_lookup: Vec<u64>,
-    // no_lookup: Vec<u64>,
-    // ne_lookup: Vec<u64>,
-    // ea_lookup: Vec<u64>,
-    // se_lookup: Vec<u64>,
-    // so_lookup: Vec<u64>,
-    // sw_lookup: Vec<u64>,
     white_pawn_lookup: Vec<u64>, // captures
     black_pawn_lookup: Vec<u64>,
 }
 
-//Notes:
-/*
-any move must have flags to indicate additional information such as the type of piece during promotion.
-*/
 impl GameState {
     fn new(fen: String) -> GameState {
         let parsed: Vec<&str> = fen.split(" ").collect();
@@ -382,6 +353,7 @@ impl GameState {
             "b" => Color::Black,
             _ => panic!("Invalid color"),
         };
+        //Castling verified later on
         let castling = parsed[2].to_owned();
         let mut white_castling = (false, false);
         let mut black_castling = (false, false);
@@ -451,8 +423,8 @@ impl GameState {
 
         let mut white_checkmask = 0u64;
         let mut black_checkmask = 0u64;
-        let mut white_pinmask = 0u64;
-        let mut black_pinmask = 0u64;
+        let white_pinmask = 0u64;
+        let black_pinmask = 0u64;
 
         white_checkmask |= (knight_lookup[w_king_idx] & pieces.b_knight)
             | (king_lookup[w_king_idx] & pieces.b_king);
@@ -503,7 +475,7 @@ impl GameState {
 
         let mut white_checkers_copy = white_checkers;
         let mut black_checkers_copy = black_checkers;
-        //TODO: Fix check system (sliders must go through king)
+
         while white_checkers_copy > 0 {
             white_checkmask |= slide_lookup
                 .get(&(pieces.w_king | (1u64 << white_checkers_copy.trailing_zeros())))
@@ -518,19 +490,19 @@ impl GameState {
         }
 
         white_checkers |= (knight_lookup[w_king_idx] & pieces.b_knight)
-            | (king_lookup[w_king_idx] & pieces.b_king);
+            | (king_lookup[w_king_idx] & pieces.b_king)
+            | (white_pawn_lookup[w_king_idx] & pieces.b_pawn);
         black_checkers |= (knight_lookup[b_king_idx] & pieces.w_knight)
-            | (king_lookup[b_king_idx] & pieces.w_king);
+            | (king_lookup[b_king_idx] & pieces.w_king)
+            | (black_pawn_lookup[b_king_idx] & pieces.w_pawn);
+
+        white_checkmask |= white_pawn_lookup[w_king_idx] & pieces.b_pawn;
+        black_checkmask |= black_pawn_lookup[b_king_idx] & pieces.w_pawn;
 
         white_checkmask |= knight_lookup[w_king_idx] & pieces.b_knight;
         black_checkmask |= knight_lookup[b_king_idx] & pieces.w_knight;
         white_checkmask &= !pieces.w_king;
         black_checkmask &= !pieces.b_king;
-
-        println!(
-            "Checkers: White: {}, Black: {}",
-            white_checkers, black_checkers
-        );
 
         let white_pinmask = PinMask {
             h: (east_attacks(pieces.w_king, empty | white_pinned)
@@ -561,11 +533,6 @@ impl GameState {
                 & !black_checkmask,
         };
 
-        // white_pinmask |=
-        //     vision(pieces.w_king, empty | white_pinned) & !pieces.white_pieces & !white_checkmask;
-        // black_pinmask |=
-        //     vision(pieces.b_king, empty | black_pinned) & !pieces.black_pieces & !black_checkmask;
-
         if white_checkmask == 0 {
             white_checkmask = ALL_BITS;
         }
@@ -576,22 +543,6 @@ impl GameState {
         white_checkmask &= !pieces.white_pieces;
         black_checkmask &= !pieces.black_pieces;
 
-        // if white_pinmask == 0 {
-        //     white_pinmask = ALL_BITS;
-        // }
-        // if black_pinmask == 0 {
-        //     black_pinmask = ALL_BITS;
-        // }
-
-        // println!(
-        //     "White pinmask: {}, Black pinmask: {}",
-        //     white_pinmask, black_pinmask
-        // );
-        println!(
-            "Checkmask: White: {}, Black: {}",
-            white_checkmask, black_checkmask
-        );
-        // println!("{}", pieces.w_rook | pieces.w_queen);
         let mut white_space = nort_attacks(pieces.w_rook | pieces.w_queen, empty)
             | noea_attacks(pieces.w_bishop | pieces.w_queen, empty)
             | east_attacks(pieces.w_rook | pieces.w_queen, empty)
@@ -609,38 +560,94 @@ impl GameState {
             | west_attacks(pieces.b_rook | pieces.b_queen, empty)
             | nowe_attacks(pieces.b_bishop | pieces.b_queen, empty);
 
+        let white_king_empty = empty | pieces.w_king;
+        let black_king_empty = empty | pieces.b_king;
+        let mut white_king_danger = nort_attacks(pieces.b_rook | pieces.b_queen, white_king_empty)
+            | noea_attacks(pieces.b_bishop | pieces.b_queen, white_king_empty)
+            | east_attacks(pieces.b_rook | pieces.b_queen, white_king_empty)
+            | soea_attacks(pieces.b_bishop | pieces.b_queen, white_king_empty)
+            | sout_attacks(pieces.b_rook | pieces.b_queen, white_king_empty)
+            | sowe_attacks(pieces.b_bishop | pieces.b_queen, white_king_empty)
+            | west_attacks(pieces.b_rook | pieces.b_queen, white_king_empty)
+            | nowe_attacks(pieces.b_bishop | pieces.b_queen, white_king_empty);
+        let mut black_king_danger = nort_attacks(pieces.w_rook | pieces.w_queen, black_king_empty)
+            | noea_attacks(pieces.w_bishop | pieces.w_queen, black_king_empty)
+            | east_attacks(pieces.w_rook | pieces.w_queen, black_king_empty)
+            | soea_attacks(pieces.w_bishop | pieces.w_queen, black_king_empty)
+            | sout_attacks(pieces.w_rook | pieces.w_queen, black_king_empty)
+            | sowe_attacks(pieces.w_bishop | pieces.w_queen, black_king_empty)
+            | west_attacks(pieces.w_rook | pieces.w_queen, black_king_empty)
+            | nowe_attacks(pieces.w_bishop | pieces.w_queen, black_king_empty);
+
         white_space |= king_lookup[w_king_idx];
         black_space |= king_lookup[b_king_idx];
 
         let mut pawns_copy = pieces.w_pawn;
         while pawns_copy > 0 {
             white_space |= white_pawn_lookup[pawns_copy.trailing_zeros() as usize];
+            black_king_danger |= white_pawn_lookup[pawns_copy.trailing_zeros() as usize];
             pawns_copy &= pawns_copy - 1;
         }
         pawns_copy = pieces.b_pawn;
         while pawns_copy > 0 {
             black_space |= black_pawn_lookup[pawns_copy.trailing_zeros() as usize];
+            white_king_danger |= black_pawn_lookup[pawns_copy.trailing_zeros() as usize];
             pawns_copy &= pawns_copy - 1;
         }
 
         let mut knights_copy = pieces.w_knight;
         while knights_copy > 0 {
             white_space |= knight_lookup[knights_copy.trailing_zeros() as usize];
+            black_king_danger |= knight_lookup[knights_copy.trailing_zeros() as usize];
             knights_copy &= knights_copy - 1;
         }
+        white_king_danger |= king_lookup[b_king_idx];
+        black_king_danger |= king_lookup[w_king_idx];
         knights_copy = pieces.b_knight;
         while knights_copy > 0 {
             black_space |= knight_lookup[knights_copy.trailing_zeros() as usize];
+            white_king_danger |= knight_lookup[knights_copy.trailing_zeros() as usize];
             knights_copy &= knights_copy - 1;
         }
-
-        println!("White space: {}", white_space);
-
+        let mut legal_castling = (false, false, false, false);
+        if w_king_idx == 4 {
+            if white_castling.0
+                && pieces.w_rook & 1 == 1
+                && empty & 0xe == 0xe
+                && black_space & 0xc == 0
+            {
+                legal_castling.0 = true;
+            }
+            if white_castling.1
+                && pieces.w_rook & 0x80 == 0x80
+                && empty & 0x60 == 0x60
+                && black_space & 0x60 == 0
+            {
+                legal_castling.1 = true;
+            }
+        };
+        if b_king_idx == 60 {
+            if black_castling.0
+                && pieces.b_rook & 1 << 56 == 1 << 56
+                && empty & 0xe00000000000000 == 0xe00000000000000
+                && white_space & 0xc00000000000000 == 0
+            {
+                legal_castling.2 = true;
+            }
+            if black_castling.1
+                && pieces.b_rook & 1 << 63 == 1 << 63
+                && empty & 0x6000000000000000 == 0x6000000000000000
+                && white_space & 0x6000000000000000 == 0
+            {
+                legal_castling.3 = true;
+            }
+        }
         GameState {
             pieces,
             empty,
             white_castling,
             black_castling,
+            legal_castling,
             active_color,
             halfmoves,
             fullmoves,
@@ -665,8 +672,13 @@ impl GameState {
                 black_pinmask,
                 white_pinned,
                 black_pinned,
+                white_king_danger,
+                black_king_danger,
             },
         }
+    }
+    fn apply_move(&self) -> GameState {
+        todo!()
     }
     fn default() -> GameState {
         GameState::new("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_owned())
@@ -677,16 +689,29 @@ impl GameState {
             Color::White => self.w_king_idx,
             Color::Black => self.b_king_idx,
         };
-        let mut bb = match color {
+        let mut bb;
+        match color {
             Color::White => {
-                self.king_lookup[self.w_king_idx]
-                    & !self.masks.black_space
-                    & !self.pieces.white_pieces
+                bb = self.king_lookup[self.w_king_idx]
+                    & !self.masks.white_king_danger
+                    & !self.pieces.white_pieces;
+                if self.legal_castling.0 {
+                    bb |= 0x4
+                }
+                if self.legal_castling.1 {
+                    bb |= 0x40
+                }
             }
             Color::Black => {
-                self.king_lookup[self.b_king_idx]
-                    & !self.masks.white_space
-                    & !self.pieces.black_pieces
+                bb = self.king_lookup[self.b_king_idx]
+                    & !self.masks.black_king_danger
+                    & !self.pieces.black_pieces;
+                if self.legal_castling.2 {
+                    bb |= 400000000000000
+                }
+                if self.legal_castling.3 {
+                    bb |= 4000000000000000
+                }
             }
         };
         while bb > 0 {
@@ -711,29 +736,11 @@ impl GameState {
                 our_knights = self.pieces.w_knight;
                 our_pieces = self.pieces.white_pieces;
                 us_pinned = self.masks.white_pinned;
-                // while knights > 0 {
-                //     if self.masks.white_pinned & 1u64 << knights.trailing_zeros() > 0 {
-                //         knights &= knights - 1;
-                //         continue;
-                //     }
-                //     moves |= self.knight_lookup[knights.trailing_zeros() as usize]
-                //         & self.masks.white_checkmask;
-                //     knights &= knights - 1;
-                // }
             }
             Color::Black => {
                 our_knights = self.pieces.b_knight;
                 our_pieces = self.pieces.black_pieces;
                 us_pinned = self.masks.black_pinned;
-                // while knights > 0 {
-                //     if self.masks.black_pinned & 1u64 << knights.trailing_zeros() > 0 {
-                //         knights &= knights - 1;
-                //         continue;
-                //     }
-                //     moves |= self.knight_lookup[knights.trailing_zeros() as usize]
-                //         & self.masks.black_checkmask;
-                //     knights &= knights - 1;
-                // }
             }
         }
         while our_knights > 0 {
@@ -752,10 +759,10 @@ impl GameState {
                 });
                 bb_moves &= bb_moves - 1;
             }
+            our_knights &= our_knights - 1;
         }
         moves
     }
-    //fn does not take double checks into account; that's the job of the main moves fn
     fn rook_moves(&self, color: Color) -> Vec<Move> {
         let our_rooks;
         let our_pieces;
@@ -1006,7 +1013,7 @@ impl GameState {
                     if let Some(sq) = self.en_passant {
                         if self.white_pawn_lookup[current_piece as usize] & (1u64 << sq) > 0 {
                             let potential_white_checkers =
-                                horizontal_lookup[4] & (self.pieces.b_queen | self.pieces.b_rook);
+                                HORIZONTAL_LOOKUP[4] & (self.pieces.b_queen | self.pieces.b_rook);
                             let empty = self.empty | 1u64 << current_piece | 1u64 << (sq - 8);
                             let white_checkers = (east_attacks(self.pieces.w_king, empty)
                                 | west_attacks(self.pieces.w_king, empty))
@@ -1015,8 +1022,15 @@ impl GameState {
                                 bb_moves |= 1u64 << sq
                             }
                         }
+                        if (self.masks.white_checkers & self.pieces.b_pawn).count_ones() == 1
+                            && ((self.masks.white_checkers & self.pieces.b_pawn).trailing_zeros()
+                                + 8) as usize
+                                == sq
+                        {
+                            bb_moves |= 1u64 << sq;
+                            movemask |= 1u64 << sq;
+                        }
                     }
-                    // println!("BB Moves: {}, index: {}", bb_moves, current_piece);
                     bb_moves &= movemask;
                     while bb_moves > 0 {
                         let bb_move = bb_moves.trailing_zeros();
@@ -1092,7 +1106,7 @@ impl GameState {
                     if let Some(sq) = self.en_passant {
                         if self.black_pawn_lookup[current_piece as usize] & (1u64 << sq) > 0 {
                             let potential_black_checkers =
-                                horizontal_lookup[3] & (self.pieces.w_queen | self.pieces.w_rook);
+                                HORIZONTAL_LOOKUP[3] & (self.pieces.w_queen | self.pieces.w_rook);
                             let empty = self.empty | 1u64 << current_piece | 1u64 << (sq + 8);
                             let black_checkers = (east_attacks(self.pieces.b_king, empty)
                                 | west_attacks(self.pieces.b_king, empty))
@@ -1100,6 +1114,14 @@ impl GameState {
                             if black_checkers == 0 {
                                 bb_moves |= 1u64 << sq
                             }
+                        }
+                        if (self.masks.black_checkers & self.pieces.w_pawn).count_ones() == 1
+                            && ((self.masks.black_checkers & self.pieces.w_pawn).trailing_zeros()
+                                - 8) as usize
+                                == sq
+                        {
+                            bb_moves |= 1u64 << sq;
+                            movemask |= 1u64 << sq;
                         }
                     }
                     bb_moves &= movemask;
@@ -1147,7 +1169,7 @@ impl GameState {
         moves
     }
     fn moves(&self, color: Color) -> Vec<Move> {
-        let mut move_list: Vec<Move> = vec![];
+        let move_list: Vec<Move>;
         let checkers = match color {
             Color::White => self.masks.white_checkers,
             Color::Black => self.masks.black_checkers,
@@ -1171,374 +1193,6 @@ impl GameState {
         move_list
     }
 }
-// fn all_moves(self) -> Self {
-//     todo!()
-// }
-// fn in_check(self, color: Color) -> bool {
-//     match color {
-//         Color::White => {
-//             let king_index = self.pieces.w_king.trailing_zeros() as usize;
-//             ((self.king_lookup[king_index] & self.pieces.b_king)
-//                 | (self.queen_lookup[king_index] & self.pieces.b_queen)
-//                 | (self.rook_lookup[king_index] & self.pieces.b_rook)
-//                 | (self.bishop_lookup[king_index] & self.pieces.b_bishop)
-//                 | (self.knight_lookup[king_index] & self.pieces.b_knight)
-//                 | (self.white_pawn_lookup[king_index] & self.pieces.b_pawn))
-//                 > 0
-//         }
-//         Color::Black => {
-//             let king_index = self.pieces.b_king.trailing_zeros() as usize;
-//             ((self.king_lookup[king_index] & self.pieces.w_king)
-//                 | (self.queen_lookup[king_index] & self.pieces.w_queen)
-//                 | (self.rook_lookup[king_index] & self.pieces.w_rook)
-//                 | (self.bishop_lookup[king_index] & self.pieces.w_bishop)
-//                 | (self.knight_lookup[king_index] & self.pieces.w_knight)
-//                 | (self.black_pawn_lookup[king_index] & self.pieces.w_pawn))
-//                 > 0
-//         }
-//     }
-// }
-// fn pseudo_legal_moves(
-//     &self,
-//     piece_type: PieceType,
-//     piece_index: usize,
-//     piece_color: Color,
-// ) -> u64 {
-//     let our_pieces: u64;
-//     let their_pieces: u64;
-//     let pawn_coefficient: i32;
-//     let pawn_lookup: u64;
-//     let starting_pawn_rank: usize;
-//     // let our_pieces = match piece_color {
-//     //     Color::White => self.pieces.white_pieces,
-//     //     Color::Black => self.pieces.black_pieces,
-//     // };
-//     // let their_pieces = match piece_color {
-//     //     Color::White => self.pieces.black_pieces,
-//     //     Color::Black => self.pieces.white_pieces,
-//     // };
-//     match piece_color {
-//         Color::White => {
-//             our_pieces = self.pieces.white_pieces;
-//             their_pieces = self.pieces.black_pieces;
-//             pawn_coefficient = -8;
-//             pawn_lookup = self.white_pawn_lookup[piece_index];
-//             starting_pawn_rank = 6;
-//         }
-//         Color::Black => {
-//             our_pieces = self.pieces.black_pieces;
-//             their_pieces = self.pieces.white_pieces;
-//             pawn_coefficient = 8;
-//             pawn_lookup = self.black_pawn_lookup[piece_index];
-//             starting_pawn_rank = 1;
-//         }
-//     }
-//     let moves = match piece_type {
-//         //implement castling
-//         PieceType::King => self.king_lookup[piece_index] & !our_pieces,
-//         PieceType::Queen => {
-//             let mut queen_moves = 0u64;
-//             let mut blockers = self.queen_lookup[piece_index] & (their_pieces | our_pieces);
-//             let lesser: u64;
-//             let mut greater = 0u64;
-//             while blockers > 1 << piece_index {
-//                 let blocker = 63 - blockers.leading_zeros() as usize;
-//                 greater |= 1 << blocker;
-//                 set_bit(&mut blockers, blocker, false);
-//             }
-//             lesser = blockers;
-//             let north: u64;
-//             let northeast: u64;
-//             let east: u64;
-//             let southeast: u64;
-//             let south: u64;
-//             let southwest: u64;
-//             let west: u64;
-//             let northwest: u64;
-
-//             if self.we_lookup[piece_index] & lesser > 0 {
-//                 west = 1 << 63 - (self.we_lookup[piece_index] & lesser).leading_zeros();
-//             } else {
-//                 queen_moves |= self.we_lookup[piece_index];
-//                 west = 0;
-//             }
-//             if self.nw_lookup[piece_index] & lesser > 0 {
-//                 northwest = 1 << 63 - (self.nw_lookup[piece_index] & lesser).leading_zeros();
-//             } else {
-//                 queen_moves |= self.nw_lookup[piece_index];
-//                 northwest = 0;
-//             }
-//             if self.no_lookup[piece_index] & lesser > 0 {
-//                 north = 1 << 63 - (self.no_lookup[piece_index] & lesser).leading_zeros();
-//             } else {
-//                 queen_moves |= self.no_lookup[piece_index];
-//                 north = 0;
-//             }
-//             if self.ne_lookup[piece_index] & lesser > 0 {
-//                 northeast = 1 << 63 - (self.ne_lookup[piece_index] & lesser).leading_zeros();
-//             } else {
-//                 queen_moves |= self.ne_lookup[piece_index];
-//                 northeast = 0;
-//             }
-
-//             if self.ea_lookup[piece_index] & greater > 0 {
-//                 east = 1 << (self.ea_lookup[piece_index] & greater).trailing_zeros();
-//             } else {
-//                 queen_moves |= self.ea_lookup[piece_index];
-//                 east = 0;
-//             }
-//             if self.se_lookup[piece_index] & greater > 0 {
-//                 southeast = 1 << (self.se_lookup[piece_index] & greater).trailing_zeros();
-//             } else {
-//                 queen_moves |= self.se_lookup[piece_index];
-//                 southeast = 0;
-//             }
-//             if self.so_lookup[piece_index] & greater > 0 {
-//                 south = 1 << (self.so_lookup[piece_index] & greater).trailing_zeros();
-//             } else {
-//                 queen_moves |= self.so_lookup[piece_index];
-//                 south = 0;
-//             }
-//             if self.sw_lookup[piece_index] & greater > 0 {
-//                 southwest = 1 << (self.sw_lookup[piece_index] & greater).trailing_zeros();
-//             } else {
-//                 queen_moves |= self.sw_lookup[piece_index];
-//                 southwest = 0;
-//             }
-//             let mut parsed_blockers: u64 =
-//                 west | northwest | north | northeast | east | southeast | south | southwest;
-//             while parsed_blockers > 0 {
-//                 let blocker_index = parsed_blockers.trailing_zeros() as usize;
-//                 let key: u64 = 1 << piece_index | 1 << blocker_index;
-//                 queen_moves |= self.slide_lookup.get(&key).unwrap();
-//                 parsed_blockers &= parsed_blockers - 1;
-//             }
-//             queen_moves & !(our_pieces) & !(1 << piece_index)
-//         }
-//         PieceType::Rook => {
-//             let mut rook_moves = 0u64;
-//             let mut blockers = self.rook_lookup[piece_index] & (their_pieces | our_pieces);
-//             let lesser: u64;
-//             let mut greater = 0u64;
-//             while blockers > 1 << piece_index {
-//                 let blocker = 63 - blockers.leading_zeros() as usize;
-//                 greater |= 1 << blocker;
-//                 set_bit(&mut blockers, blocker, false);
-//             }
-//             lesser = blockers;
-//             let north: u64;
-//             let east: u64;
-//             let south: u64;
-//             let west: u64;
-
-//             if self.we_lookup[piece_index] & lesser > 0 {
-//                 west = 1 << 63 - (self.we_lookup[piece_index] & lesser).leading_zeros();
-//             } else {
-//                 rook_moves |= self.we_lookup[piece_index];
-//                 west = 0;
-//             }
-//             if self.no_lookup[piece_index] & lesser > 0 {
-//                 north = 1 << 63 - (self.no_lookup[piece_index] & lesser).leading_zeros();
-//             } else {
-//                 rook_moves |= self.no_lookup[piece_index];
-//                 north = 0;
-//             }
-//             if self.ea_lookup[piece_index] & greater > 0 {
-//                 east = 1 << (self.ea_lookup[piece_index] & greater).trailing_zeros();
-//             } else {
-//                 rook_moves |= self.ea_lookup[piece_index];
-//                 east = 0;
-//             }
-//             if self.so_lookup[piece_index] & greater > 0 {
-//                 south = 1 << (self.so_lookup[piece_index] & greater).trailing_zeros();
-//             } else {
-//                 rook_moves |= self.so_lookup[piece_index];
-//                 south = 0;
-//             }
-//             let mut parsed_blockers: u64 = north | east | south | west;
-//             while parsed_blockers > 0 {
-//                 let blocker_index = parsed_blockers.trailing_zeros() as usize;
-//                 let key: u64 = 1 << piece_index | 1 << blocker_index;
-//                 rook_moves |= self.slide_lookup.get(&key).unwrap();
-//                 parsed_blockers &= parsed_blockers - 1;
-//             }
-//             rook_moves & !(our_pieces) & !(1 << piece_index)
-//         }
-//         PieceType::Bishop => {
-//             let mut bishop_moves = 0u64;
-//             let mut blockers = self.bishop_lookup[piece_index] & (their_pieces | our_pieces);
-//             let lesser: u64;
-//             let mut greater = 0u64;
-//             while blockers > 1 << piece_index {
-//                 let blocker = 63 - blockers.leading_zeros() as usize;
-//                 greater |= 1 << blocker;
-//                 set_bit(&mut blockers, blocker, false);
-//             }
-//             lesser = blockers;
-//             let northeast: u64;
-//             let southeast: u64;
-//             let southwest: u64;
-//             let northwest: u64;
-
-//             if self.nw_lookup[piece_index] & lesser > 0 {
-//                 northwest = 1 << 63 - (self.nw_lookup[piece_index] & lesser).leading_zeros();
-//             } else {
-//                 bishop_moves |= self.nw_lookup[piece_index];
-//                 northwest = 0;
-//             }
-//             if self.ne_lookup[piece_index] & lesser > 0 {
-//                 northeast = 1 << 63 - (self.ne_lookup[piece_index] & lesser).leading_zeros();
-//             } else {
-//                 bishop_moves |= self.ne_lookup[piece_index];
-//                 northeast = 0;
-//             }
-//             if self.se_lookup[piece_index] & greater > 0 {
-//                 southeast = 1 << (self.se_lookup[piece_index] & greater).trailing_zeros();
-//             } else {
-//                 bishop_moves |= self.se_lookup[piece_index];
-//                 southeast = 0;
-//             }
-//             if self.sw_lookup[piece_index] & greater > 0 {
-//                 southwest = 1 << (self.sw_lookup[piece_index] & greater).trailing_zeros();
-//             } else {
-//                 bishop_moves |= self.sw_lookup[piece_index];
-//                 southwest = 0;
-//             }
-//             let mut parsed_blockers: u64 = northwest | northeast | southeast | southwest;
-//             while parsed_blockers > 0 {
-//                 let blocker_index = parsed_blockers.trailing_zeros() as usize;
-//                 let key: u64 = 1 << piece_index | 1 << blocker_index;
-//                 bishop_moves |= self.slide_lookup.get(&key).unwrap();
-//                 parsed_blockers &= parsed_blockers - 1;
-//             }
-//             bishop_moves & !(our_pieces) & !(1 << piece_index)
-//         }
-//         PieceType::Knight => self.knight_lookup[piece_index] & !our_pieces,
-//         PieceType::Pawn => {
-//             let mut pawn_captures: u64 = 0;
-//             let mut pawn_pushes: u64 = 0;
-//             // let mut blockers: u64 = (1 << (piece_index as i32 + pawn_coefficient)
-//             //     | 1 << (piece_index as i32 + 2 * pawn_coefficient))
-//             //     & (our_pieces | their_pieces);
-//             let single_blocker: u64 =
-//                 1 << (piece_index as i32 + 1 * pawn_coefficient) & (our_pieces | their_pieces);
-//             let double_blocker: u64 =
-//                 1 << (piece_index as i32 + 2 * pawn_coefficient) & (our_pieces | their_pieces);
-
-//             pawn_captures |= pawn_lookup & their_pieces;
-//             // println!("s {} d {}", single_blocker, double_blocker);
-//             // println!("{}", pawn_captures);
-//             if let Some(square) = self.en_passant {
-//                 pawn_captures |= 1 << square;
-//             }
-//             // println!("{}", pawn_captures);
-//             pawn_pushes |= !single_blocker & (1 << piece_index as i32 + 1 * pawn_coefficient);
-//             if starting_pawn_rank == piece_index / 8 && single_blocker == 0 {
-//                 pawn_pushes |=
-//                     !double_blocker & (1 << piece_index as i32 + 2 * pawn_coefficient);
-//             }
-//             pawn_captures | pawn_pushes & !(1 << piece_index)
-//         }
-//     };
-//     moves
-// }
-//generates the moves for a given piece
-// fn all_moves(
-//     &self,
-//     piece_index: usize,
-//     piece_type: PieceType,
-//     piece_color: Color,
-// ) -> Vec<Move> {
-//     let mut king_danger_squares = 0u64;
-//     let their_color = match piece_color {
-//         Color::White => Color::Black,
-//         Color::Black => Color::White,
-//     };
-//     for square in 0..64 {
-//         if let Some(piece_type) = self.pieces.piece_type_lookup[square] {
-//             if Some(their_color) == self.pieces.color_lookup[square] {
-//                 king_danger_squares |= self.pseudo_legal_moves(piece_type, square, their_color);
-//             }
-//         }
-//     }
-//     println!("{}", king_danger_squares);
-//     return vec![Move {
-//         from: 0,
-//         to: 0,
-//         castling_square: None,
-//         piece_color: Color::White,
-//         promoted_piece: None,
-//     }];
-//     // todo!()
-// }
-// fn piece_moves(&self, piece_type: PieceType, piece_index: usize, piece_color: Color) -> u64 {
-
-//     match piece_type {
-//         PieceType::King => self.king_lookup[index],
-//         PieceType::Rook => self.rook_lookup[index],
-//         PieceType::Bishop => self.bishop_lookup[index],
-//         PieceType::Knight => self.knight_lookup[index],
-//         _ => 0u64,
-//     }
-// }
-// fn every_piece(&self, color: Color) {
-//     // let mut pieces = match color {
-//     //     Color::White => self.pieces.white_pieces,
-//     //     Color::Black => self.pieces.black_pieces,
-//     // };
-//     // while pieces != 0 {
-//     //     let idx = 63 - pieces.trailing_zeros() as usize;
-//     //     let piece_type = self.pieces.piece_types[idx].expect("Invalid piece");
-//     //     let moves = self.piece_moves(piece_type, idx) & !pieces;
-//     //     // println!("Moves for {:?}: {:?}", piece_type, moves);
-//     //     pieces &= pieces - 1;
-//     // }
-// }
-// }
-//index must be either the biggest or smallest
-// pub fn closest(index: usize, a: usize, b: usize) -> usize {
-//     if index < min(a, b) {
-//         return min(a, b);
-//     } else if index > std::cmp::max(a, b) {
-//         return std::cmp::max(a, b);
-//     }
-//     panic!("index must either be biggest or smallest")
-// }
-// pub fn direction(start: usize, end: usize) -> Direction {
-//     let start_zeros = start.trailing_zeros() as i32;
-//     let end_zeros = end.trailing_zeros() as i32;
-//     let rank1 = start_zeros / 8;
-//     let file1 = start_zeros % 8;
-//     let rank2 = end_zeros / 8;
-//     let file2 = end_zeros % 8;
-//     if rank1 - rank2 == file2 - file1 {
-//         if start > end {
-//             Direction::NorthEast
-//         } else {
-//             Direction::SouthWest
-//         }
-//     } else if rank1 - rank2 == file1 - file2 {
-//         if start > end {
-//             Direction::NorthWest
-//         } else {
-//             Direction::SouthEast
-//         }
-//     } else if rank1 == rank2 {
-//         if start > end {
-//             Direction::West
-//         } else {
-//             Direction::East
-//         }
-//     } else if file1 == file2 {
-//         if start > end {
-//             Direction::South
-//         } else {
-//             Direction::North
-//         }
-//     } else {
-//         panic!("invalid direction")
-//     }
-// }
 //for lookup
 pub fn to_12x10(index: isize) -> isize {
     index + 21 + 2 * (index / 8)
@@ -1752,12 +1406,38 @@ pub fn generate_slide_lookup(key: u64) -> u64 {
 //     bitboard
 // }
 fn main() {
-    let fen = "r6r/1b2k1bq/8/8/7B/8/8/R3K2R b KQ - 3 2".to_owned();
+    let fen = "2kr3r/p1ppqpb1/bn2Qnp1/3PN3/1p2P3/2N5/PPPBBPPP/R3K2R b KQ - 3 2".to_owned();
     let game: GameState = GameState::new(fen);
     let now = SystemTime::now();
-    let moves = game.moves(Color::Black);
+    let moves = game.moves(game.active_color);
+    let color = game.active_color;
+    // println!(
+    //     "Castling: White {:?} Black {:?}",
+    //     game.white_castling, game.black_castling
+    // );
+    println!(
+        "KING {} QUEEN {} ROOK {} BISHOP {} KNIGHT {} PAWN {:?}",
+        game.king_moves(color).len(),
+        game.queen_moves(color).len(),
+        game.rook_moves(color).len(),
+        game.bishop_moves(color).len(),
+        game.knight_moves(color).len(),
+        game.pawn_moves(color).len()
+    );
+    // println!("King moves");
+    // game.king_moves(Color::Black);
+    // println!("Queen moves");
+    // game.queen_moves(Color::Black);
+    // println!("Rook moves");
+    // game.rook_moves(Color::Black);
+    // println!("Bishop moves");
+    // game.bishop_moves(Color::Black);
+    // println!("Knight moves");
+    // game.knight_moves(Color::Black);
+    // println!("Pawn moves");
+    // game.pawn_moves(Color::Black);
     // println!("Enpessant {}", game.en_passant.unwrap());
-    println!("Moves: {:?} (length: {})", moves, moves.len());
+    println!("Node Count: {}", moves.len());
     // println!("White pieces: {}", game.pieces.white_pieces);
     let since = now.elapsed().expect("wtf").as_micros();
     println!("Time taken: {:?}μs", since);
@@ -1765,3 +1445,6 @@ fn main() {
 //notes
 //undefended_pieces = white_pieces - (white_space & white_pieces)
 //award +-0.5 for the bishop pair
+
+//todo
+// apply_move() function
