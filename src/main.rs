@@ -16,6 +16,23 @@ pub enum Color {
     White,
     Black,
 }
+//first time using trait! pretty useful tbh
+trait Invert {
+    fn invert(&self) -> Color;
+}
+impl Invert for Color {
+    fn invert(&self) -> Color {
+        match self {
+            Self::White => Self::Black,
+            Self::Black => Self::White,
+        }
+    }
+}
+
+struct Evaluation {
+    best_move: Move,
+    score: f32,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PieceType {
@@ -26,7 +43,7 @@ pub enum PieceType {
     Knight,
     Pawn,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum PromotionType {
     Queen,
     Rook,
@@ -83,7 +100,7 @@ const BLACK_KINGSIDE: u64 = 0x6000000000000000;
 //     checkers: u64,
 //     valid_moves: u64,
 // }
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Move {
     from: usize,
     to: usize,
@@ -91,6 +108,7 @@ pub struct Move {
     piece_color: Color,
     // castling_square: Option<usize>,
 }
+#[derive(Clone)]
 pub struct Masks {
     white_checkmask: u64,
     black_checkmask: u64,
@@ -112,6 +130,7 @@ pub struct PinMask {
     d1: u64,
     d2: u64,
 }
+#[derive(Clone)]
 pub struct Pieces {
     w_king: u64,
     w_queen: u64,
@@ -320,6 +339,7 @@ impl Pieces {
         }
     }
 }
+#[derive(Clone)]
 struct GameState {
     pieces: Pieces,
     empty: u64,
@@ -677,8 +697,136 @@ impl GameState {
             },
         }
     }
-    fn apply_move(&self) -> GameState {
-        todo!()
+    //function does not check for legality, that is the job of the movegen
+    fn apply_move(&self, piece_move: Move) -> GameState {
+        let mut new_gamestate = self.clone();
+        let piece = self.pieces.piece_type_lookup[piece_move.from];
+        match piece {
+            Some(PieceType::King) => {
+                if piece_move.piece_color == Color::White {
+                    new_gamestate.legal_castling.0 = false;
+                    new_gamestate.legal_castling.1 = false;
+                    new_gamestate.pieces.w_king = 1u64 << piece_move.to;
+                } else {
+                    new_gamestate.legal_castling.2 = false;
+                    new_gamestate.legal_castling.3 = false;
+                    new_gamestate.pieces.b_king = 1u64 << piece_move.to;
+                }
+                new_gamestate.pieces.piece_type_lookup[piece_move.from] = None;
+                new_gamestate.pieces.piece_type_lookup[piece_move.to] = Some(PieceType::King);
+            }
+            Some(PieceType::Queen) => {
+                match piece_move.piece_color {
+                    Color::White => {
+                        new_gamestate.pieces.w_queen &= !(1u64 << piece_move.from);
+                        new_gamestate.pieces.w_queen |= 1u64 << piece_move.to;
+                    }
+                    Color::Black => {
+                        new_gamestate.pieces.b_queen &= !(1u64 << piece_move.from);
+                        new_gamestate.pieces.b_queen |= 1u64 << piece_move.to;
+                    }
+                };
+                new_gamestate.pieces.piece_type_lookup[piece_move.from] = None;
+                new_gamestate.pieces.piece_type_lookup[piece_move.to] = Some(PieceType::Queen);
+            }
+            Some(PieceType::Rook) => {
+                match piece_move.from {
+                    00 => new_gamestate.legal_castling.0 = false,
+                    07 => new_gamestate.legal_castling.1 = false,
+                    56 => new_gamestate.legal_castling.2 = false,
+                    63 => new_gamestate.legal_castling.3 = false,
+                    _ => {}
+                }
+                match piece_move.piece_color {
+                    Color::White => {
+                        new_gamestate.pieces.w_rook &= !(1u64 << piece_move.from);
+                        new_gamestate.pieces.w_rook |= 1u64 << piece_move.to;
+                    }
+                    Color::Black => {
+                        new_gamestate.pieces.b_rook &= !(1u64 << piece_move.from);
+                        new_gamestate.pieces.b_rook |= 1u64 << piece_move.to;
+                    }
+                }
+                new_gamestate.pieces.piece_type_lookup[piece_move.from] = None;
+                new_gamestate.pieces.piece_type_lookup[piece_move.to] = Some(PieceType::Rook);
+            }
+            Some(PieceType::Bishop) => {
+                match piece_move.piece_color {
+                    Color::White => {
+                        new_gamestate.pieces.w_bishop &= !(1u64 << piece_move.from);
+                        new_gamestate.pieces.w_bishop |= 1u64 << piece_move.to;
+                    }
+                    Color::Black => {
+                        new_gamestate.pieces.b_bishop &= !(1u64 << piece_move.from);
+                        new_gamestate.pieces.b_bishop |= 1u64 << piece_move.to;
+                    }
+                };
+                new_gamestate.pieces.piece_type_lookup[piece_move.from] = None;
+                new_gamestate.pieces.piece_type_lookup[piece_move.to] = Some(PieceType::Bishop);
+            }
+            Some(PieceType::Knight) => {
+                match piece_move.piece_color {
+                    Color::White => {
+                        new_gamestate.pieces.w_knight &= !(1u64 << piece_move.from);
+                        new_gamestate.pieces.w_knight |= 1u64 << piece_move.to;
+                    }
+                    Color::Black => {
+                        new_gamestate.pieces.b_knight &= !(1u64 << piece_move.from);
+                        new_gamestate.pieces.b_knight |= 1u64 << piece_move.to;
+                    }
+                };
+                new_gamestate.pieces.piece_type_lookup[piece_move.from] = None;
+                new_gamestate.pieces.piece_type_lookup[piece_move.to] = Some(PieceType::Knight);
+            }
+            Some(PieceType::Pawn) => {
+                match piece_move.piece_color {
+                    Color::White => {
+                        new_gamestate.pieces.w_queen &= !(1u64 << piece_move.from);
+                        new_gamestate.pieces.w_queen |= 1u64 << piece_move.to;
+                    }
+                    Color::Black => {
+                        new_gamestate.pieces.b_queen &= !(1u64 << piece_move.from);
+                        new_gamestate.pieces.b_queen |= 1u64 << piece_move.to;
+                    }
+                };
+                new_gamestate.pieces.piece_type_lookup[piece_move.from] = None;
+                new_gamestate.pieces.piece_type_lookup[piece_move.to] = Some(PieceType::Queen);
+                if piece_move.from.abs_diff(piece_move.to) == 16 {
+                    match piece_move.piece_color {
+                        Color::White => {
+                            if (1u64 << piece_move.to << 1 | 1u64 << piece_move.to >> 1)
+                                & self.pieces.b_pawn
+                                > 0
+                            {
+                                new_gamestate.en_passant = Some(piece_move.to >> 8);
+                            }
+                        }
+                        Color::Black => {
+                            if (1u64 << piece_move.to << 1 | 1u64 << piece_move.to >> 1)
+                                & self.pieces.w_pawn
+                                > 0
+                            {
+                                new_gamestate.en_passant = Some(piece_move.to << 8);
+                            }
+                        }
+                    }
+                }
+            }
+            None => {}
+        }
+        // new_gamestate.active_color = new_gamestate.active_color.invert();
+        new_gamestate
+    }
+    fn perft(&self, depth: usize) -> u64 {
+        let mut nodes = 0;
+        if depth == 0 {
+            return 1;
+        }
+        for piece_move in self.moves(self.active_color) {
+            let new_gamestate = self.apply_move(piece_move);
+            nodes += new_gamestate.perft(depth - 1);
+        }
+        return nodes;
     }
     fn default() -> GameState {
         GameState::new("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_owned())
@@ -804,9 +952,7 @@ impl GameState {
                 } else if king_file - file == king_rank - rank {
                     rook &= rook - 1;
                     continue;
-                    // our_movemask = our_pinmask.d1;
                 } else if king_file - file == rank - king_rank {
-                    // our_movemask = our_pinmask.d2;
                     rook &= rook - 1;
                     continue;
                 } else {
@@ -869,11 +1015,9 @@ impl GameState {
                 let rank = (current_piece / 8) as i8;
                 let file = (current_piece % 8) as i8;
                 if king_rank == rank {
-                    // our_movemask = our_pinmask.h;
                     bishop &= bishop - 1;
                     continue;
                 } else if king_file == file {
-                    // our_movemask = our_pinmask.v;
                     bishop &= bishop - 1;
                     continue;
                 } else if king_file - file == king_rank - rank {
@@ -932,7 +1076,6 @@ impl GameState {
         let mut moves: Vec<Move> = vec![];
         let mut queen = our_queens;
         while queen > 0 {
-            // println!("Move mask: {}", our_movemask);
             let current_piece = queen.trailing_zeros() as u64;
             if us_pinned & 1u64 << current_piece > 0 {
                 let king_rank = (our_king.trailing_zeros() / 8) as i8;
@@ -948,7 +1091,10 @@ impl GameState {
                 } else if king_file - file == rank - king_rank {
                     our_movemask &= our_pinmask.d2;
                 } else {
-                    panic!("pin?")
+                    panic!(
+                        "pin? KR {} KF {} R {} F {}",
+                        king_rank, king_file, rank, file
+                    );
                 }
             }
             let mut bb_moves = (nort_attacks(1u64 << current_piece, self.empty)
@@ -1192,8 +1338,83 @@ impl GameState {
         }
         move_list
     }
+    // fn fen(&self) -> String {
+    //     let mut fen_string = String::new();
+    //     for rank in 0..8 {
+    //         let mut open_file_count = 0;
+    //         for file in 0..8 {
+    //             let piece = self.pieces.piece_type_lookup[rank * 8 + file];
+    //             let color = self.pieces.color_lookup[rank * 8 + file];
+    //             if piece == None {
+    //                 open_file_count += 1;
+    //             } else {
+    //                 let mut piece_str = match piece.unwrap() {
+    //                     PieceType::King => "k",
+    //                     PieceType::Queen => "q",
+    //                     PieceType::Rook => "r",
+    //                     PieceType::Bishop => "b",
+    //                     PieceType::Knight => "n",
+    //                     PieceType::Pawn => "p",
+    //                 };
+    //                 if color == Some(Color::White) {
+    //                     piece_str = piece_str.to_uppercase().as_str();
+    //                 }
+    //                 fen_string.push_str(piece_str);
+    //             }
+    //         }
+    //         if rank != 7 {
+    //             fen_string.push_str("/");
+    //             open_file_count = 0;
+    //         }
+    //     }
+    //     // for index in 0..64 {
+    //     //     let piece = self.pieces.piece_type_lookup[index];
+    //     //     let color = self.pieces.color_lookup[index];
+
+    //     // }
+    //     todo!()
+    // }
+    fn negamax(&self, depth: usize, color: Color) -> (Move, f32) {
+        let mut best_score = f32::NEG_INFINITY;
+        let mut best_move = self.moves(color)[0];
+        if depth == 0 {
+            return (best_move, self.static_eval());
+        }
+        for piece_move in self.moves(color) {
+            let new_gamestate = self.apply_move(piece_move);
+            let (_, score) = new_gamestate.negamax(depth - 1, new_gamestate.active_color.invert());
+            if -score > best_score {
+                best_score = -score;
+                best_move = piece_move;
+            }
+        }
+        (best_move, best_score)
+    }
+    fn static_eval(&self) -> f32 {
+        let score: f32;
+        let king_diff = (self.pieces.w_king.count_ones() - self.pieces.b_king.count_ones()) as f32;
+        let queen_diff =
+            (self.pieces.w_queen.count_ones() - self.pieces.b_queen.count_ones()) as f32;
+        let rook_diff = (self.pieces.w_rook.count_ones() - self.pieces.b_rook.count_ones()) as f32;
+        let bishop_diff =
+            (self.pieces.w_bishop.count_ones() - self.pieces.b_bishop.count_ones()) as f32;
+        let knight_diff =
+            (self.pieces.w_knight.count_ones() - self.pieces.b_knight.count_ones()) as f32;
+        let pawn_diff = (self.pieces.w_pawn.count_ones() - self.pieces.b_pawn.count_ones()) as f32;
+        let side = match self.active_color {
+            Color::White => 1.0,
+            Color::Black => -1.0,
+        };
+        score = 69420.0 * king_diff
+            + 9.0 * queen_diff
+            + 5.0 * rook_diff
+            + 3.0 * bishop_diff
+            + 3.0 * knight_diff
+            + pawn_diff;
+        score * side
+    }
 }
-//for lookup
+
 pub fn to_12x10(index: isize) -> isize {
     index + 21 + 2 * (index / 8)
 }
@@ -1283,60 +1504,6 @@ pub fn piece_lookup(piece_index: usize, piece_type: PieceType, piece_color: Opti
     };
     return bitboard;
 }
-// pub fn line_loookup(line_index: usize, line_type: LineType) -> u64 {
-//     let mut bitboard = 0u64;
-//     match line_type {
-//         LineType::Horizontal => {
-//             'line: for line_move in [-1, 1] {
-//                 for multiplier in 1..8 {
-//                     let new = to_12x10(line_index as isize) + line_move * multiplier;
-//                     if verify_index(new) && to_8x8(new) < 64 {
-//                         bitboard |= 1 << to_8x8(new);
-//                     } else {
-//                         continue 'line;
-//                     }
-//                 }
-//             }
-//         }
-//         LineType::Vertical => {
-//             'line: for line_move in [-10, 10] {
-//                 for multiplier in 1..8 {
-//                     let new = to_12x10(line_index as isize) + line_move * multiplier;
-//                     if verify_index(new) && to_8x8(new) < 64 {
-//                         bitboard |= 1 << to_8x8(new);
-//                     } else {
-//                         continue 'line;
-//                     }
-//                 }
-//             }
-//         }
-//         LineType::A1h8 => {
-//             'line: for line_move in [-9, 9] {
-//                 for multiplier in 1..8 {
-//                     let new = to_12x10(line_index as isize) + line_move * multiplier;
-//                     if verify_index(new) && to_8x8(new) < 64 {
-//                         bitboard |= 1 << to_8x8(new);
-//                     } else {
-//                         continue 'line;
-//                     }
-//                 }
-//             }
-//         }
-//         LineType::H1a8 => {
-//             'line: for line_move in [-11, 11] {
-//                 for multiplier in 1..8 {
-//                     let new = to_12x10(line_index as isize) + line_move * multiplier;
-//                     if verify_index(new) && to_8x8(new) < 64 {
-//                         bitboard |= 1 << to_8x8(new);
-//                     } else {
-//                         continue 'line;
-//                     }
-//                 }
-//             }
-//         }
-//     }
-//     bitboard
-// }
 pub fn line_attacks(occ: u8, sldr: u8) -> u8 {
     (occ - 2 * sldr) ^ (occ.reverse_bits() - 2 * sldr.reverse_bits()).reverse_bits()
 }
@@ -1383,68 +1550,36 @@ pub fn generate_slide_lookup(key: u64) -> u64 {
     }
     bitboard
 }
-// pub fn directional_lookup(index: usize, direction: Direction) -> u64 {
-//     let direction_offset = match direction {
-//         Direction::West => -1,
-//         Direction::NorthWest => -11,
-//         Direction::North => -10,
-//         Direction::NorthEast => -9,
-//         Direction::East => 1,
-//         Direction::SouthEast => 11,
-//         Direction::South => 10,
-//         Direction::SouthWest => 9,
-//     };
-//     let mut bitboard = 0u64;
-//     for multiplier in 1..8 {
-//         let new = to_12x10(index as isize) + direction_offset * multiplier;
-//         if verify_index(new) && to_8x8(new) < 64 {
-//             bitboard |= 1 << to_8x8(new);
-//         } else {
-//             break;
-//         }
-//     }
-//     bitboard
-// }
 fn main() {
-    let fen = "2kr3r/p1ppqpb1/bn2Qnp1/3PN3/1p2P3/2N5/PPPBBPPP/R3K2R b KQ - 3 2".to_owned();
+    let fen = "8/8/8/2k1q1Q1/8/8/2K5/8 w - - 0 1".to_owned();
     let game: GameState = GameState::new(fen);
     let now = SystemTime::now();
-    let moves = game.moves(game.active_color);
-    let color = game.active_color;
+    // let moves = game.moves(game.active_color);
+    // let color = game.active_color;
+    // let king_moves = game.king_moves(color);
+    // let new_game = game.apply_move(king_moves[0]);
     // println!(
-    //     "Castling: White {:?} Black {:?}",
-    //     game.white_castling, game.black_castling
+    //     "KING {} QUEEN {} ROOK {} BISHOP {} KNIGHT {} PAWN {:?}",
+    //     game.king_moves(color).len(),
+    //     game.queen_moves(color).len(),
+    //     game.rook_moves(color).len(),
+    //     game.bishop_moves(color).len(),
+    //     game.knight_moves(color).len(),
+    //     game.pawn_moves(color).len()
     // );
-    println!(
-        "KING {} QUEEN {} ROOK {} BISHOP {} KNIGHT {} PAWN {:?}",
-        game.king_moves(color).len(),
-        game.queen_moves(color).len(),
-        game.rook_moves(color).len(),
-        game.bishop_moves(color).len(),
-        game.knight_moves(color).len(),
-        game.pawn_moves(color).len()
-    );
-    // println!("King moves");
-    // game.king_moves(Color::Black);
-    // println!("Queen moves");
-    // game.queen_moves(Color::Black);
-    // println!("Rook moves");
-    // game.rook_moves(Color::Black);
-    // println!("Bishop moves");
-    // game.bishop_moves(Color::Black);
-    // println!("Knight moves");
-    // game.knight_moves(Color::Black);
-    // println!("Pawn moves");
-    // game.pawn_moves(Color::Black);
-    // println!("Enpessant {}", game.en_passant.unwrap());
-    println!("Node Count: {}", moves.len());
-    // println!("White pieces: {}", game.pieces.white_pieces);
-    let since = now.elapsed().expect("wtf").as_micros();
-    println!("Time taken: {:?}μs", since);
+    // let nodes = game.perft(4);
+    // println!("Node Count: {}", nodes);
+    let (best_move, score) = game.negamax(3, game.active_color);
+    println!("Score: {}, Best Move: {:?}", score, best_move);
+    let since = now.elapsed().expect("wtf").as_millis() as u64;
+    println!("Time taken: {:?}ms", since);
+    // println!("Nodes per Second: {}", nodes / since * 1000);
 }
 //notes
 //undefended_pieces = white_pieces - (white_space & white_pieces)
 //award +-0.5 for the bishop pair
 
 //todo
-// apply_move() function
+//fix movegen bugs
+//fix negamax not working
+//regenerate masks  each time a move is made
