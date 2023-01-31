@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::{collections::HashMap, vec};
 // mod test;
 mod sliding_pieces;
@@ -108,6 +109,11 @@ pub struct Move {
     piece_color: Color,
     // castling_square: Option<usize>,
 }
+impl Move {
+    pub fn display(&self) -> String {
+        format!("{}{}", format_move(self.from), format_move(self.to))
+    }
+}
 #[derive(Clone)]
 pub struct Masks {
     white_checkmask: u64,
@@ -130,7 +136,7 @@ pub struct PinMask {
     d1: u64,
     d2: u64,
 }
-#[derive(Clone)]
+#[derive(Clone, Copy, Debug)]
 pub struct Pieces {
     w_king: u64,
     w_queen: u64,
@@ -356,6 +362,7 @@ struct GameState {
     rook_lookup: Vec<u64>,
     bishop_lookup: Vec<u64>,
     knight_lookup: Vec<u64>,
+    slide_lookup: HashMap<u64, u64>,
 
     masks: Masks,
     w_king_idx: usize,
@@ -679,6 +686,7 @@ impl GameState {
             knight_lookup,
             white_pawn_lookup,
             black_pawn_lookup,
+            slide_lookup,
             w_king_idx,
             b_king_idx,
             masks: Masks {
@@ -700,6 +708,65 @@ impl GameState {
     //function does not check for legality, that is the job of the movegen
     fn apply_move(&self, piece_move: Move) -> GameState {
         let mut new_gamestate = self.clone();
+        let captured = new_gamestate.pieces.piece_type_lookup[piece_move.to];
+        let captured_color = new_gamestate.pieces.color_lookup[piece_move.to];
+        // println!("{:?}", self.pieces.piece_type_lookup);
+        // println!("{:?}", captured);
+        // println!(
+        //     "wtf {:?} {}",
+        //     new_gamestate.pieces.piece_type_lookup[33], piece_move.to
+        // );
+        // if captured != None {
+        //     println!("{} captured", format_move(piece_move.to));
+        // }
+        match captured {
+            None => {}
+            Some(PieceType::King) => panic!("illegal move"),
+            Some(PieceType::Queen) => {
+                if captured_color == Some(Color::White) {
+                    new_gamestate.pieces.w_queen &= !(1 << piece_move.to)
+                } else {
+                    new_gamestate.pieces.b_queen &= !(1 << piece_move.to)
+                }
+            }
+            Some(PieceType::Rook) => {
+                if captured_color == Some(Color::White) {
+                    new_gamestate.pieces.w_rook &= !(1 << piece_move.to)
+                } else {
+                    new_gamestate.pieces.b_rook &= !(1 << piece_move.to)
+                }
+            }
+            Some(PieceType::Bishop) => {
+                if captured_color == Some(Color::White) {
+                    new_gamestate.pieces.w_bishop &= !(1 << piece_move.to)
+                } else {
+                    new_gamestate.pieces.b_bishop &= !(1 << piece_move.to)
+                }
+            }
+            Some(PieceType::Knight) => {
+                if captured_color == Some(Color::White) {
+                    new_gamestate.pieces.w_knight &= !(1 << piece_move.to)
+                } else {
+                    new_gamestate.pieces.b_knight &= !(1 << piece_move.to)
+                }
+            }
+            Some(PieceType::Pawn) => {
+                if captured_color == Some(Color::White) {
+                    if Some(piece_move.to) == new_gamestate.en_passant {
+                        new_gamestate.pieces.w_pawn &= !(1 << piece_move.to << 8);
+                    } else {
+                        new_gamestate.pieces.w_pawn &= !(1 << piece_move.to);
+                    }
+                } else {
+                    if Some(piece_move.to) == new_gamestate.en_passant {
+                        new_gamestate.pieces.b_pawn &= !(1 << piece_move.to >> 8);
+                    } else {
+                        new_gamestate.pieces.b_pawn &= !(1 << piece_move.to);
+                    }
+                }
+            }
+        };
+        new_gamestate.active_color = new_gamestate.active_color.invert();
         let piece = self.pieces.piece_type_lookup[piece_move.from];
         match piece {
             Some(PieceType::King) => {
@@ -781,16 +848,17 @@ impl GameState {
             Some(PieceType::Pawn) => {
                 match piece_move.piece_color {
                     Color::White => {
-                        new_gamestate.pieces.w_queen &= !(1u64 << piece_move.from);
-                        new_gamestate.pieces.w_queen |= 1u64 << piece_move.to;
+                        new_gamestate.pieces.w_pawn &= !(1u64 << piece_move.from);
+                        new_gamestate.pieces.w_pawn |= 1u64 << piece_move.to;
                     }
                     Color::Black => {
-                        new_gamestate.pieces.b_queen &= !(1u64 << piece_move.from);
-                        new_gamestate.pieces.b_queen |= 1u64 << piece_move.to;
+                        new_gamestate.pieces.b_pawn &= !(1u64 << piece_move.from);
+                        new_gamestate.pieces.b_pawn |= 1u64 << piece_move.to;
                     }
                 };
+                // println!("pawn");
                 new_gamestate.pieces.piece_type_lookup[piece_move.from] = None;
-                new_gamestate.pieces.piece_type_lookup[piece_move.to] = Some(PieceType::Queen);
+                new_gamestate.pieces.piece_type_lookup[piece_move.to] = Some(PieceType::Pawn);
                 if piece_move.from.abs_diff(piece_move.to) == 16 {
                     match piece_move.piece_color {
                         Color::White => {
@@ -814,7 +882,248 @@ impl GameState {
             }
             None => {}
         }
-        // new_gamestate.active_color = new_gamestate.active_color.invert();
+        //regenerate masks
+        let pieces = new_gamestate.pieces;
+        let king_lookup = &new_gamestate.king_lookup;
+        let queen_lookup = &new_gamestate.queen_lookup;
+        let rook_lookup = &new_gamestate.rook_lookup;
+        let bishop_lookup = &new_gamestate.bishop_lookup;
+        let knight_lookup = &new_gamestate.knight_lookup;
+        let slide_lookup = &new_gamestate.slide_lookup;
+        let white_pawn_lookup = &new_gamestate.white_pawn_lookup;
+        let black_pawn_lookup = &new_gamestate.black_pawn_lookup;
+        let w_king_idx = pieces.w_king.trailing_zeros() as usize;
+        let b_king_idx = pieces.b_king.trailing_zeros() as usize;
+
+        let potential_white_checkers = (queen_lookup[w_king_idx] & pieces.b_queen)
+            | (rook_lookup[w_king_idx] & pieces.b_rook)
+            | (bishop_lookup[w_king_idx] & pieces.b_bishop);
+        let potential_black_checkers = (queen_lookup[b_king_idx] & pieces.w_queen)
+            | (rook_lookup[b_king_idx] & pieces.w_rook)
+            | (bishop_lookup[b_king_idx] & pieces.w_bishop);
+
+        let mut white_checkmask = 0u64;
+        let mut black_checkmask = 0u64;
+        let white_pinmask = 0u64;
+        let black_pinmask = 0u64;
+
+        white_checkmask |= (knight_lookup[w_king_idx] & pieces.b_knight)
+            | (king_lookup[w_king_idx] & pieces.b_king);
+        black_checkmask |= (knight_lookup[b_king_idx] & pieces.w_knight)
+            | (king_lookup[b_king_idx] & pieces.w_king);
+
+        let empty = !(pieces.white_pieces | pieces.black_pieces);
+        let white_king_vision = vision(pieces.w_king, empty);
+        let black_king_vision = vision(pieces.b_king, empty);
+        let mut white_checkers = white_king_vision & potential_white_checkers;
+        let mut black_checkers = black_king_vision & potential_black_checkers;
+
+        let white_pinned = ((nort_attacks(pieces.w_king, empty)
+            & sout_attacks(pieces.b_rook | pieces.b_queen, empty))
+            | (noea_attacks(pieces.w_king, empty)
+                & sowe_attacks(pieces.b_bishop | pieces.b_queen, empty))
+            | (east_attacks(pieces.w_king, empty)
+                & west_attacks(pieces.b_rook | pieces.b_queen, empty))
+            | (soea_attacks(pieces.w_king, empty)
+                & nowe_attacks(pieces.b_bishop | pieces.b_queen, empty))
+            | (sout_attacks(pieces.w_king, empty)
+                & nort_attacks(pieces.b_rook | pieces.b_queen, empty))
+            | (sowe_attacks(pieces.w_king, empty)
+                & noea_attacks(pieces.b_bishop | pieces.b_queen, empty))
+            | (west_attacks(pieces.w_king, empty)
+                & east_attacks(pieces.b_rook | pieces.b_queen, empty))
+            | (nowe_attacks(pieces.w_king, empty)
+                & soea_attacks(pieces.b_bishop | pieces.b_queen, empty)))
+            & pieces.white_pieces;
+
+        let black_pinned = ((nort_attacks(pieces.b_king, empty)
+            & sout_attacks(pieces.w_rook | pieces.w_queen, empty))
+            | (noea_attacks(pieces.b_king, empty)
+                & sowe_attacks(pieces.w_bishop | pieces.w_queen, empty))
+            | (east_attacks(pieces.b_king, empty)
+                & west_attacks(pieces.w_rook | pieces.w_queen, empty))
+            | (soea_attacks(pieces.b_king, empty)
+                & nowe_attacks(pieces.w_bishop | pieces.w_queen, empty))
+            | (sout_attacks(pieces.b_king, empty)
+                & nort_attacks(pieces.w_rook | pieces.w_queen, empty))
+            | (sowe_attacks(pieces.b_king, empty)
+                & noea_attacks(pieces.w_bishop | pieces.w_queen, empty))
+            | (west_attacks(pieces.b_king, empty)
+                & east_attacks(pieces.w_rook | pieces.w_queen, empty))
+            | (nowe_attacks(pieces.b_king, empty)
+                & soea_attacks(pieces.w_bishop | pieces.w_queen, empty)))
+            & pieces.black_pieces;
+
+        let mut white_checkers_copy = white_checkers;
+        let mut black_checkers_copy = black_checkers;
+
+        while white_checkers_copy > 0 {
+            white_checkmask |= slide_lookup
+                .get(&(pieces.w_king | (1u64 << white_checkers_copy.trailing_zeros())))
+                .unwrap();
+            white_checkers_copy &= white_checkers_copy - 1;
+        }
+        while black_checkers_copy > 0 {
+            black_checkmask |= slide_lookup
+                .get(&(pieces.b_king | (1u64 << black_checkers_copy.trailing_zeros())))
+                .unwrap();
+            black_checkers_copy &= black_checkers_copy - 1;
+        }
+
+        white_checkers |= (knight_lookup[w_king_idx] & pieces.b_knight)
+            | (king_lookup[w_king_idx] & pieces.b_king)
+            | (white_pawn_lookup[w_king_idx] & pieces.b_pawn);
+        black_checkers |= (knight_lookup[b_king_idx] & pieces.w_knight)
+            | (king_lookup[b_king_idx] & pieces.w_king)
+            | (black_pawn_lookup[b_king_idx] & pieces.w_pawn);
+
+        white_checkmask |= white_pawn_lookup[w_king_idx] & pieces.b_pawn;
+        black_checkmask |= black_pawn_lookup[b_king_idx] & pieces.w_pawn;
+
+        white_checkmask |= knight_lookup[w_king_idx] & pieces.b_knight;
+        black_checkmask |= knight_lookup[b_king_idx] & pieces.w_knight;
+        white_checkmask &= !pieces.w_king;
+        black_checkmask &= !pieces.b_king;
+
+        let white_pinmask = PinMask {
+            h: (east_attacks(pieces.w_king, empty | white_pinned)
+                | west_attacks(pieces.w_king, empty | white_pinned))
+                & !white_checkmask,
+            v: (nort_attacks(pieces.w_king, empty | white_pinned)
+                | sout_attacks(pieces.w_king, empty | white_pinned))
+                & !white_checkmask,
+            d1: (noea_attacks(pieces.w_king, empty | white_pinned)
+                | sowe_attacks(pieces.w_king, empty | white_pinned))
+                & !white_checkmask,
+            d2: (nowe_attacks(pieces.w_king, empty | white_pinned)
+                | soea_attacks(pieces.w_king, empty | white_pinned))
+                & !white_checkmask,
+        };
+        let black_pinmask = PinMask {
+            h: (east_attacks(pieces.b_king, empty | black_pinned)
+                | west_attacks(pieces.b_king, empty | black_pinned))
+                & !black_checkmask,
+            v: (nort_attacks(pieces.b_king, empty | black_pinned)
+                | sout_attacks(pieces.b_king, empty | black_pinned))
+                & !black_checkmask,
+            d1: (noea_attacks(pieces.b_king, empty | black_pinned)
+                | sowe_attacks(pieces.b_king, empty | black_pinned))
+                & !black_checkmask,
+            d2: (nowe_attacks(pieces.b_king, empty | black_pinned)
+                | soea_attacks(pieces.b_king, empty | black_pinned))
+                & !black_checkmask,
+        };
+
+        if white_checkmask == 0 {
+            white_checkmask = ALL_BITS;
+        }
+        if black_checkmask == 0 {
+            black_checkmask = ALL_BITS;
+        }
+
+        white_checkmask &= !pieces.white_pieces;
+        black_checkmask &= !pieces.black_pieces;
+
+        let mut white_space = nort_attacks(pieces.w_rook | pieces.w_queen, empty)
+            | noea_attacks(pieces.w_bishop | pieces.w_queen, empty)
+            | east_attacks(pieces.w_rook | pieces.w_queen, empty)
+            | soea_attacks(pieces.w_bishop | pieces.w_queen, empty)
+            | sout_attacks(pieces.w_rook | pieces.w_queen, empty)
+            | sowe_attacks(pieces.w_bishop | pieces.w_queen, empty)
+            | west_attacks(pieces.w_rook | pieces.w_queen, empty)
+            | nowe_attacks(pieces.w_bishop | pieces.w_queen, empty);
+        let mut black_space = nort_attacks(pieces.b_rook | pieces.b_queen, empty)
+            | noea_attacks(pieces.b_bishop | pieces.b_queen, empty)
+            | east_attacks(pieces.b_rook | pieces.b_queen, empty)
+            | soea_attacks(pieces.b_bishop | pieces.b_queen, empty)
+            | sout_attacks(pieces.b_rook | pieces.b_queen, empty)
+            | sowe_attacks(pieces.b_bishop | pieces.b_queen, empty)
+            | west_attacks(pieces.b_rook | pieces.b_queen, empty)
+            | nowe_attacks(pieces.b_bishop | pieces.b_queen, empty);
+
+        let white_king_empty = empty | pieces.w_king;
+        let black_king_empty = empty | pieces.b_king;
+        let mut white_king_danger = nort_attacks(pieces.b_rook | pieces.b_queen, white_king_empty)
+            | noea_attacks(pieces.b_bishop | pieces.b_queen, white_king_empty)
+            | east_attacks(pieces.b_rook | pieces.b_queen, white_king_empty)
+            | soea_attacks(pieces.b_bishop | pieces.b_queen, white_king_empty)
+            | sout_attacks(pieces.b_rook | pieces.b_queen, white_king_empty)
+            | sowe_attacks(pieces.b_bishop | pieces.b_queen, white_king_empty)
+            | west_attacks(pieces.b_rook | pieces.b_queen, white_king_empty)
+            | nowe_attacks(pieces.b_bishop | pieces.b_queen, white_king_empty);
+        let mut black_king_danger = nort_attacks(pieces.w_rook | pieces.w_queen, black_king_empty)
+            | noea_attacks(pieces.w_bishop | pieces.w_queen, black_king_empty)
+            | east_attacks(pieces.w_rook | pieces.w_queen, black_king_empty)
+            | soea_attacks(pieces.w_bishop | pieces.w_queen, black_king_empty)
+            | sout_attacks(pieces.w_rook | pieces.w_queen, black_king_empty)
+            | sowe_attacks(pieces.w_bishop | pieces.w_queen, black_king_empty)
+            | west_attacks(pieces.w_rook | pieces.w_queen, black_king_empty)
+            | nowe_attacks(pieces.w_bishop | pieces.w_queen, black_king_empty);
+
+        white_space |= king_lookup[w_king_idx];
+        black_space |= king_lookup[b_king_idx];
+
+        let mut pawns_copy = pieces.w_pawn;
+        while pawns_copy > 0 {
+            white_space |= white_pawn_lookup[pawns_copy.trailing_zeros() as usize];
+            black_king_danger |= white_pawn_lookup[pawns_copy.trailing_zeros() as usize];
+            pawns_copy &= pawns_copy - 1;
+        }
+        pawns_copy = pieces.b_pawn;
+        while pawns_copy > 0 {
+            black_space |= black_pawn_lookup[pawns_copy.trailing_zeros() as usize];
+            white_king_danger |= black_pawn_lookup[pawns_copy.trailing_zeros() as usize];
+            pawns_copy &= pawns_copy - 1;
+        }
+
+        let mut knights_copy = pieces.w_knight;
+        while knights_copy > 0 {
+            white_space |= knight_lookup[knights_copy.trailing_zeros() as usize];
+            black_king_danger |= knight_lookup[knights_copy.trailing_zeros() as usize];
+            knights_copy &= knights_copy - 1;
+        }
+        white_king_danger |= king_lookup[b_king_idx];
+        black_king_danger |= king_lookup[w_king_idx];
+        knights_copy = pieces.b_knight;
+        while knights_copy > 0 {
+            black_space |= knight_lookup[knights_copy.trailing_zeros() as usize];
+            white_king_danger |= knight_lookup[knights_copy.trailing_zeros() as usize];
+            knights_copy &= knights_copy - 1;
+        }
+        new_gamestate.masks = Masks {
+            white_checkmask,
+            black_checkmask,
+            white_space,
+            black_space,
+            white_checkers,
+            black_checkers,
+            white_pinmask,
+            black_pinmask,
+            white_pinned,
+            black_pinned,
+            white_king_danger,
+            black_king_danger,
+        };
+        new_gamestate.pieces.color_lookup[piece_move.from] = None;
+        new_gamestate.pieces.color_lookup[piece_move.to] = Some(piece_move.piece_color);
+        new_gamestate.pieces.white_pieces = new_gamestate.pieces.w_king
+            | new_gamestate.pieces.w_queen
+            | new_gamestate.pieces.w_rook
+            | new_gamestate.pieces.w_bishop
+            | new_gamestate.pieces.w_knight
+            | new_gamestate.pieces.w_pawn;
+        new_gamestate.pieces.black_pieces = new_gamestate.pieces.b_king
+            | new_gamestate.pieces.b_queen
+            | new_gamestate.pieces.b_rook
+            | new_gamestate.pieces.b_bishop
+            | new_gamestate.pieces.b_knight
+            | new_gamestate.pieces.b_pawn;
+        new_gamestate.empty =
+            !(new_gamestate.pieces.white_pieces | new_gamestate.pieces.black_pieces);
+        // println!(
+        //     "{:?}",
+        //     new_gamestate.pieces.piece_type_lookup[piece_move.to]
+        // );
         new_gamestate
     }
     fn perft(&self, depth: usize) -> u64 {
@@ -827,6 +1136,28 @@ impl GameState {
             nodes += new_gamestate.perft(depth - 1);
         }
         return nodes;
+    }
+    fn divide(&self, depth: usize) {
+        let moves = self.moves(self.active_color);
+        for piece_move in moves {
+            let new_board = self.apply_move(piece_move);
+            let move_nodes = new_board.perft(depth - 1);
+            // let new_moves = new_board
+            //     .moves(new_board.active_color)
+            //     .iter()
+            //     .map(|&m| m.display())
+            //     .collect::<Vec<_>>();
+            // if new_moves.len() != 20 {
+            println!(
+                "{}{}: {}",
+                format_move(piece_move.from),
+                format_move(piece_move.to),
+                move_nodes
+            );
+            // }
+        }
+        let nodes = self.perft(depth);
+        println!("\nNodes searched: {}", nodes);
     }
     fn default() -> GameState {
         GameState::new("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_owned())
@@ -843,6 +1174,9 @@ impl GameState {
                 bb = self.king_lookup[self.w_king_idx]
                     & !self.masks.white_king_danger
                     & !self.pieces.white_pieces;
+                if self.pieces.w_king & self.masks.black_space > 0 {
+                    return moves;
+                };
                 if self.legal_castling.0 {
                     bb |= 0x4
                 }
@@ -854,6 +1188,9 @@ impl GameState {
                 bb = self.king_lookup[self.b_king_idx]
                     & !self.masks.black_king_danger
                     & !self.pieces.black_pieces;
+                if self.pieces.b_king & self.masks.white_space > 0 {
+                    return moves;
+                };
                 if self.legal_castling.2 {
                     bb |= 400000000000000
                 }
@@ -1242,9 +1579,15 @@ impl GameState {
                     }
                     let mut bb_moves =
                         self.black_pawn_lookup[current_piece as usize] & self.pieces.white_pieces;
+                    // println!(
+                    //     "{} {} {}",
+                    //     1u64 << current_piece,
+                    //     self.empty,
+                    //     (1u64 << current_piece) >> 8 & self.empty > 0
+                    // );
                     if (1u64 << current_piece) >> 8 & self.empty > 0 {
                         bb_moves |= (1u64 << current_piece) >> 8;
-                        if (1u64 << current_piece) >> 16 & self.empty > 0 && current_piece / 8 == 6
+                        if (1u64 << current_piece) >> 16 & self.empty > 0 && current_piece >> 3 == 6
                         {
                             bb_moves |= (1u64 << current_piece) >> 16;
                         }
@@ -1415,6 +1758,13 @@ impl GameState {
     }
 }
 
+fn format_move(index: usize) -> String {
+    let rank = (index >> 3) as u8;
+    let file = (index & 7) as u8;
+    let rank = char::from(rank + 49); // '1'
+    let file = char::from(file + 97); // 'a'
+    return format!("{}{}", file, rank);
+}
 pub fn to_12x10(index: isize) -> isize {
     index + 21 + 2 * (index / 8)
 }
@@ -1504,7 +1854,7 @@ pub fn piece_lookup(piece_index: usize, piece_type: PieceType, piece_color: Opti
     };
     return bitboard;
 }
-pub fn line_attacks(occ: u8, sldr: u8) -> u8 {
+pub const fn line_attacks(occ: u8, sldr: u8) -> u8 {
     (occ - 2 * sldr) ^ (occ.reverse_bits() - 2 * sldr.reverse_bits()).reverse_bits()
 }
 pub fn generate_slide_lookup(key: u64) -> u64 {
@@ -1551,13 +1901,34 @@ pub fn generate_slide_lookup(key: u64) -> u64 {
     bitboard
 }
 fn main() {
-    let fen = "8/8/8/2k1q1Q1/8/8/2K5/8 w - - 0 1".to_owned();
-    let game: GameState = GameState::new(fen);
-    let now = SystemTime::now();
+    // let fen = "rnbqkbnr/pppppppp/8/7P/8/8/1PPPPPPP/RNBQKBNR b KQkq - 0 1".to_owned();
+    // let game: GameState = GameState::new(fen);
+    let game = GameState::default();
     // let moves = game.moves(game.active_color);
+    // game = game.apply_move(moves[0]);
     // let color = game.active_color;
     // let king_moves = game.king_moves(color);
-    // let new_game = game.apply_move(king_moves[0]);
+    let game = game.apply_move(Move {
+        from: 1,
+        to: 18,
+        piece_color: game.active_color,
+        promoted_piece: None,
+    });
+    let game = game.apply_move(Move {
+        from: 51,
+        to: 35,
+        piece_color: game.active_color,
+        promoted_piece: None,
+    });
+    // // println!(" E {:?}", game.pieces.piece_type_lookup[33]);
+    let game = game.apply_move(Move {
+        from: 18,
+        to: 35,
+        piece_color: game.active_color,
+        promoted_piece: None,
+    });
+    println!("{}", game.pieces.w_knight);
+    // println!("{}, {:?}", new_game.pieces.white_pieces, new_game.pieces);
     // println!(
     //     "KING {} QUEEN {} ROOK {} BISHOP {} KNIGHT {} PAWN {:?}",
     //     game.king_moves(color).len(),
@@ -1567,12 +1938,15 @@ fn main() {
     //     game.knight_moves(color).len(),
     //     game.pawn_moves(color).len()
     // );
-    // let nodes = game.perft(4);
+    // let now = SystemTime::now();
+    // let nodes = game.perft(2);
     // println!("Node Count: {}", nodes);
-    let (best_move, score) = game.negamax(3, game.active_color);
-    println!("Score: {}, Best Move: {:?}", score, best_move);
-    let since = now.elapsed().expect("wtf").as_millis() as u64;
-    println!("Time taken: {:?}ms", since);
+    game.divide(1);
+    // let (best_move, score) = game.negamax(3, game.active_color);
+    // println!("Score: {}, Best Move: {:?}", score, best_move);
+    // let since = now.elapsed().expect("wtf").as_millis() as u64;
+    // println!("Time taken: {:?}ms", since);
+    // println!("{}", format_move(0));
     // println!("Nodes per Second: {}", nodes / since * 1000);
 }
 //notes
