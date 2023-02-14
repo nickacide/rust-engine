@@ -766,7 +766,6 @@ impl GameState {
                 }
             }
         };
-        new_gamestate.active_color = new_gamestate.active_color.invert();
         let piece = self.pieces.piece_type_lookup[piece_move.from];
         match piece {
             Some(PieceType::King) => {
@@ -856,7 +855,6 @@ impl GameState {
                         new_gamestate.pieces.b_pawn |= 1u64 << piece_move.to;
                     }
                 };
-                // println!("pawn");
                 new_gamestate.pieces.piece_type_lookup[piece_move.from] = None;
                 new_gamestate.pieces.piece_type_lookup[piece_move.to] = Some(PieceType::Pawn);
                 if piece_move.from.abs_diff(piece_move.to) == 16 {
@@ -866,7 +864,9 @@ impl GameState {
                                 & self.pieces.b_pawn
                                 > 0
                             {
-                                new_gamestate.en_passant = Some(piece_move.to >> 8);
+                                new_gamestate.en_passant =
+                                    Some(((1u64 << piece_move.to) >> 8).trailing_zeros() as usize);
+                                // println!("{:?} {}", new_gamestate.en_passant, piece_move.to);
                             }
                         }
                         Color::Black => {
@@ -874,7 +874,9 @@ impl GameState {
                                 & self.pieces.w_pawn
                                 > 0
                             {
-                                new_gamestate.en_passant = Some(piece_move.to << 8);
+                                new_gamestate.en_passant =
+                                    Some(((1u64 << piece_move.to) << 8).trailing_zeros() as usize);
+                                // println!("{:?}, {}", new_gamestate.en_passant, piece_move.to);
                             }
                         }
                     }
@@ -882,8 +884,9 @@ impl GameState {
             }
             None => {}
         }
+        new_gamestate.active_color = new_gamestate.active_color.invert();
         //regenerate masks
-        let pieces = new_gamestate.pieces;
+        let mut pieces = new_gamestate.pieces;
         let king_lookup = &new_gamestate.king_lookup;
         let queen_lookup = &new_gamestate.queen_lookup;
         let rook_lookup = &new_gamestate.rook_lookup;
@@ -894,6 +897,21 @@ impl GameState {
         let black_pawn_lookup = &new_gamestate.black_pawn_lookup;
         let w_king_idx = pieces.w_king.trailing_zeros() as usize;
         let b_king_idx = pieces.b_king.trailing_zeros() as usize;
+        new_gamestate.w_king_idx = w_king_idx;
+        new_gamestate.b_king_idx = b_king_idx;
+
+        pieces.white_pieces = new_gamestate.pieces.w_king
+            | new_gamestate.pieces.w_queen
+            | new_gamestate.pieces.w_rook
+            | new_gamestate.pieces.w_bishop
+            | new_gamestate.pieces.w_knight
+            | new_gamestate.pieces.w_pawn;
+        pieces.black_pieces = new_gamestate.pieces.b_king
+            | new_gamestate.pieces.b_queen
+            | new_gamestate.pieces.b_rook
+            | new_gamestate.pieces.b_bishop
+            | new_gamestate.pieces.b_knight
+            | new_gamestate.pieces.b_pawn;
 
         let potential_white_checkers = (queen_lookup[w_king_idx] & pieces.b_queen)
             | (rook_lookup[w_king_idx] & pieces.b_rook)
@@ -904,8 +922,6 @@ impl GameState {
 
         let mut white_checkmask = 0u64;
         let mut black_checkmask = 0u64;
-        let white_pinmask = 0u64;
-        let black_pinmask = 0u64;
 
         white_checkmask |= (knight_lookup[w_king_idx] & pieces.b_knight)
             | (king_lookup[w_king_idx] & pieces.b_king);
@@ -980,8 +996,6 @@ impl GameState {
         white_checkmask |= white_pawn_lookup[w_king_idx] & pieces.b_pawn;
         black_checkmask |= black_pawn_lookup[b_king_idx] & pieces.w_pawn;
 
-        white_checkmask |= knight_lookup[w_king_idx] & pieces.b_knight;
-        black_checkmask |= knight_lookup[b_king_idx] & pieces.w_knight;
         white_checkmask &= !pieces.w_king;
         black_checkmask &= !pieces.b_king;
 
@@ -1106,18 +1120,8 @@ impl GameState {
         };
         new_gamestate.pieces.color_lookup[piece_move.from] = None;
         new_gamestate.pieces.color_lookup[piece_move.to] = Some(piece_move.piece_color);
-        new_gamestate.pieces.white_pieces = new_gamestate.pieces.w_king
-            | new_gamestate.pieces.w_queen
-            | new_gamestate.pieces.w_rook
-            | new_gamestate.pieces.w_bishop
-            | new_gamestate.pieces.w_knight
-            | new_gamestate.pieces.w_pawn;
-        new_gamestate.pieces.black_pieces = new_gamestate.pieces.b_king
-            | new_gamestate.pieces.b_queen
-            | new_gamestate.pieces.b_rook
-            | new_gamestate.pieces.b_bishop
-            | new_gamestate.pieces.b_knight
-            | new_gamestate.pieces.b_pawn;
+        new_gamestate.pieces.white_pieces = pieces.white_pieces;
+        new_gamestate.pieces.black_pieces = pieces.black_pieces;
         new_gamestate.empty =
             !(new_gamestate.pieces.white_pieces | new_gamestate.pieces.black_pieces);
         // println!(
@@ -1174,9 +1178,6 @@ impl GameState {
                 bb = self.king_lookup[self.w_king_idx]
                     & !self.masks.white_king_danger
                     & !self.pieces.white_pieces;
-                if self.pieces.w_king & self.masks.black_space > 0 {
-                    return moves;
-                };
                 if self.legal_castling.0 {
                     bb |= 0x4
                 }
@@ -1188,19 +1189,17 @@ impl GameState {
                 bb = self.king_lookup[self.b_king_idx]
                     & !self.masks.black_king_danger
                     & !self.pieces.black_pieces;
-                if self.pieces.b_king & self.masks.white_space > 0 {
-                    return moves;
-                };
                 if self.legal_castling.2 {
-                    bb |= 400000000000000
+                    bb |= 0x400000000000000
                 }
                 if self.legal_castling.3 {
-                    bb |= 4000000000000000
+                    bb |= 0x4000000000000000
                 }
             }
         };
         while bb > 0 {
             let king_move = bb.trailing_zeros() as usize;
+            // println!("km {}", king_move);
             moves.push(Move {
                 from: king_idx,
                 to: king_move,
@@ -1215,17 +1214,20 @@ impl GameState {
         let mut moves: Vec<Move> = vec![];
         let our_pieces;
         let mut our_knights;
+        let our_movemask;
         let us_pinned;
         match color {
             Color::White => {
                 our_knights = self.pieces.w_knight;
                 our_pieces = self.pieces.white_pieces;
                 us_pinned = self.masks.white_pinned;
+                our_movemask = self.masks.white_checkmask;
             }
             Color::Black => {
                 our_knights = self.pieces.b_knight;
                 our_pieces = self.pieces.black_pieces;
                 us_pinned = self.masks.black_pinned;
+                our_movemask = self.masks.black_checkmask;
             }
         }
         while our_knights > 0 {
@@ -1233,8 +1235,9 @@ impl GameState {
                 our_knights &= our_knights - 1;
                 continue;
             }
-            let mut bb_moves =
-                self.knight_lookup[our_knights.trailing_zeros() as usize] & !our_pieces;
+            let mut bb_moves = self.knight_lookup[our_knights.trailing_zeros() as usize]
+                & !our_pieces
+                & our_movemask;
             while bb_moves > 0 {
                 moves.push(Move {
                     from: our_knights.trailing_zeros() as usize,
@@ -1494,6 +1497,7 @@ impl GameState {
                         }
                     }
                     if let Some(sq) = self.en_passant {
+                        // println!("sq {}", sq.trailing_zeros());
                         if self.white_pawn_lookup[current_piece as usize] & (1u64 << sq) > 0 {
                             let potential_white_checkers =
                                 HORIZONTAL_LOOKUP[4] & (self.pieces.b_queen | self.pieces.b_rook);
@@ -1593,7 +1597,11 @@ impl GameState {
                         }
                     }
                     if let Some(sq) = self.en_passant {
-                        if self.black_pawn_lookup[current_piece as usize] & (1u64 << sq) > 0 {
+                        // println!("sq {}", sq.trailing_zeros());
+                        if self.black_pawn_lookup[current_piece as usize]
+                            & (1u64 << sq.trailing_zeros())
+                            > 0
+                        {
                             let potential_black_checkers =
                                 HORIZONTAL_LOOKUP[3] & (self.pieces.w_queen | self.pieces.w_rook);
                             let empty = self.empty | 1u64 << current_piece | 1u64 << (sq + 8);
@@ -1901,33 +1909,45 @@ pub fn generate_slide_lookup(key: u64) -> u64 {
     bitboard
 }
 fn main() {
-    // let fen = "rnbqkbnr/pppppppp/8/7P/8/8/1PPPPPPP/RNBQKBNR b KQkq - 0 1".to_owned();
-    // let game: GameState = GameState::new(fen);
-    let game = GameState::default();
+    let fen = "3k4/3p4/8/K1P4r/8/8/8/8 b - - 0 1".to_owned();
+    let game: GameState = GameState::new(fen);
+    // let game = GameState::default();
     // let moves = game.moves(game.active_color);
     // game = game.apply_move(moves[0]);
     // let color = game.active_color;
     // let king_moves = game.king_moves(color);
     let game = game.apply_move(Move {
-        from: 1,
-        to: 18,
+        from: 59,
+        to: 50,
         piece_color: game.active_color,
         promoted_piece: None,
     });
+    let game = game.apply_move(Move {
+        from: 32,
+        to: 25,
+        piece_color: game.active_color,
+        promoted_piece: None,
+    });
+    let game = game.apply_move(Move {
+        from: 34,
+        to: 43,
+        piece_color: game.active_color,
+        promoted_piece: None,
+    });
+    // let game = game.apply_move(Move {
+    //     from: 25,
+    //     to: 16,
+    //     piece_color: game.active_color,
+    //     promoted_piece: None,
+    // });
     let game = game.apply_move(Move {
         from: 51,
         to: 35,
         piece_color: game.active_color,
         promoted_piece: None,
     });
-    // // println!(" E {:?}", game.pieces.piece_type_lookup[33]);
-    let game = game.apply_move(Move {
-        from: 18,
-        to: 35,
-        piece_color: game.active_color,
-        promoted_piece: None,
-    });
-    println!("{}", game.pieces.w_knight);
+    // println!("Mask {}", game.masks.black_checkmask);
+    // println!("{}", game.pieces.w_knight);
     // println!("{}, {:?}", new_game.pieces.white_pieces, new_game.pieces);
     // println!(
     //     "KING {} QUEEN {} ROOK {} BISHOP {} KNIGHT {} PAWN {:?}",
@@ -1941,7 +1961,11 @@ fn main() {
     // let now = SystemTime::now();
     // let nodes = game.perft(2);
     // println!("Node Count: {}", nodes);
-    game.divide(1);
+    game.divide(2);
+    println!("{}", game.masks.black_checkmask);
+    // println!("{:?}", game.en_passant);
+    // println!("{}", game.masks.black_king_danger);
+    // println!("Moves: {:?}", game.king_moves(game.active_color).len());
     // let (best_move, score) = game.negamax(3, game.active_color);
     // println!("Score: {}, Best Move: {:?}", score, best_move);
     // let since = now.elapsed().expect("wtf").as_millis() as u64;
@@ -1956,4 +1980,3 @@ fn main() {
 //todo
 //fix movegen bugs
 //fix negamax not working
-//regenerate masks  each time a move is made
