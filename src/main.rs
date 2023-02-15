@@ -1801,40 +1801,45 @@ fn main() {}
 // fix en-pessant pin
 
 #[cfg(test)]
-fn test_divide() {
-    // let fen = "3k4/3p4/8/K1P4r/8/8/8/8 b - - 0 1".to_owned();
-    // let game: GameState = GameState::new(fen);
-    let game = GameState::default();
-    // let game = game.apply_move(Move {
-    //     from: 39,
-    //     to: 47,
-    //     piece_color: game.active_color,
-    //     promoted_piece: None,
-    // });
-    // let game = game.apply_move(Move {
-    //     from: 32,
-    //     to: 33,
-    //     piece_color: game.active_color,
-    //     promoted_piece: None,
-    // });
-    // let game = game.apply_move(Move {
-    //     from: 47,
-    //     to: 42,
-    //     piece_color: game.active_color,
-    //     promoted_piece: None,
-    // });
-    // let game = game.apply_move(Move {
-    //     from: 33,
-    //     to: 26,
-    //     piece_color: game.active_color,
-    //     promoted_piece: None,
-    // });
-    // let game = game.apply_move(Move {
-    //     from: 35,
-    //     to: 27,
-    //     piece_color: game.active_color,
-    //     promoted_piece: None,
-    // });
-    // println!("Mask {}", game.masks.black_checkmask);
-    game.divide(6);
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_divide() {
+        // let fen = "3k4/3p4/8/K1P4r/8/8/8/8 b - - 0 1".to_owned();
+        // let game: GameState = GameState::new(fen);
+        let game = GameState::default();
+        // let game = game.apply_move(Move {
+        //     from: 39,
+        //     to: 47,
+        //     piece_color: game.active_color,
+        //     promoted_piece: None,
+        // });
+        // let game = game.apply_move(Move {
+        //     from: 32,
+        //     to: 33,
+        //     piece_color: game.active_color,
+        //     promoted_piece: None,
+        // });
+        // let game = game.apply_move(Move {
+        //     from: 47,
+        //     to: 42,
+        //     piece_color: game.active_color,
+        //     promoted_piece: None,
+        // });
+        // let game = game.apply_move(Move {
+        //     from: 33,
+        //     to: 26,
+        //     piece_color: game.active_color,
+        //     promoted_piece: None,
+        // });
+        // let game = game.apply_move(Move {
+        //     from: 35,
+        //     to: 27,
+        //     piece_color: game.active_color,
+        //     promoted_piece: None,
+        // });
+        // println!("Mask {}", game.masks.black_checkmask);
+        game.divide(4);
+    }
 }
