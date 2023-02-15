@@ -719,6 +719,9 @@ impl GameState {
         // if captured != None {
         //     println!("{} captured", format_move(piece_move.to));
         // }
+        if captured != Some(PieceType::Pawn) {
+            new_gamestate.en_passant = None;
+        }
         match captured {
             None => {}
             Some(PieceType::King) => panic!("illegal move"),
@@ -752,17 +755,17 @@ impl GameState {
             }
             Some(PieceType::Pawn) => {
                 if captured_color == Some(Color::White) {
-                    if Some(piece_move.to) == new_gamestate.en_passant {
-                        new_gamestate.pieces.w_pawn &= !(1 << piece_move.to << 8);
-                    } else {
-                        new_gamestate.pieces.w_pawn &= !(1 << piece_move.to);
-                    }
+                    // if Some(piece_move.to) == new_gamestate.en_passant {
+                    //     new_gamestate.pieces.w_pawn &= !(1 << piece_move.to << 8);
+                    // } else {
+                    new_gamestate.pieces.w_pawn &= !(1 << piece_move.to);
+                    // }
                 } else {
-                    if Some(piece_move.to) == new_gamestate.en_passant {
-                        new_gamestate.pieces.b_pawn &= !(1 << piece_move.to >> 8);
-                    } else {
-                        new_gamestate.pieces.b_pawn &= !(1 << piece_move.to);
-                    }
+                    //     if Some(piece_move.to) == new_gamestate.en_passant {
+                    //         new_gamestate.pieces.b_pawn &= !(1 << piece_move.to >> 8);
+                    //     } else {
+                    new_gamestate.pieces.b_pawn &= !(1 << piece_move.to);
+                    //     }
                 }
             }
         };
@@ -857,6 +860,16 @@ impl GameState {
                 };
                 new_gamestate.pieces.piece_type_lookup[piece_move.from] = None;
                 new_gamestate.pieces.piece_type_lookup[piece_move.to] = Some(PieceType::Pawn);
+                if Some(piece_move.to) == self.en_passant {
+                    match piece_move.piece_color {
+                        Color::White => {
+                            new_gamestate.pieces.b_pawn &= !(1u64 << (piece_move.to - 8))
+                        }
+                        Color::Black => {
+                            new_gamestate.pieces.w_pawn &= !(1u64 << (piece_move.to + 8))
+                        }
+                    }
+                }
                 if piece_move.from.abs_diff(piece_move.to) == 16 {
                     match piece_move.piece_color {
                         Color::White => {
@@ -1506,7 +1519,7 @@ impl GameState {
                                 | west_attacks(self.pieces.w_king, empty))
                                 & potential_white_checkers;
                             if white_checkers == 0 {
-                                bb_moves |= 1u64 << sq
+                                bb_moves |= 1u64 << sq; //& self.masks.white_pinmask.v;
                             }
                         }
                         if (self.masks.white_checkers & self.pieces.b_pawn).count_ones() == 1
@@ -1514,8 +1527,8 @@ impl GameState {
                                 + 8) as usize
                                 == sq
                         {
-                            bb_moves |= 1u64 << sq;
-                            movemask |= 1u64 << sq;
+                            bb_moves |= 1u64 << sq; // & self.masks.white_pinmask.v;
+                            movemask |= 1u64 << sq; // & self.masks.white_pinmask.v;
                         }
                     }
                     bb_moves &= movemask;
@@ -1609,7 +1622,7 @@ impl GameState {
                                 | west_attacks(self.pieces.b_king, empty))
                                 & potential_black_checkers;
                             if black_checkers == 0 {
-                                bb_moves |= 1u64 << sq
+                                bb_moves |= 1u64 << sq; // & self.masks.black_pinmask.v;
                             }
                         }
                         if (self.masks.black_checkers & self.pieces.w_pawn).count_ones() == 1
@@ -1909,43 +1922,43 @@ pub fn generate_slide_lookup(key: u64) -> u64 {
     bitboard
 }
 fn main() {
-    let fen = "3k4/3p4/8/K1P4r/8/8/8/8 b - - 0 1".to_owned();
-    let game: GameState = GameState::new(fen);
-    // let game = GameState::default();
+    // let fen = "3k4/3p4/8/K1P4r/8/8/8/8 b - - 0 1".to_owned();
+    // let game: GameState = GameState::new(fen);
+    let game = GameState::default();
     // let moves = game.moves(game.active_color);
     // game = game.apply_move(moves[0]);
     // let color = game.active_color;
     // let king_moves = game.king_moves(color);
-    let game = game.apply_move(Move {
-        from: 59,
-        to: 50,
-        piece_color: game.active_color,
-        promoted_piece: None,
-    });
-    let game = game.apply_move(Move {
-        from: 32,
-        to: 25,
-        piece_color: game.active_color,
-        promoted_piece: None,
-    });
-    let game = game.apply_move(Move {
-        from: 34,
-        to: 43,
-        piece_color: game.active_color,
-        promoted_piece: None,
-    });
     // let game = game.apply_move(Move {
-    //     from: 25,
-    //     to: 16,
+    //     from: 39,
+    //     to: 47,
     //     piece_color: game.active_color,
     //     promoted_piece: None,
     // });
-    let game = game.apply_move(Move {
-        from: 51,
-        to: 35,
-        piece_color: game.active_color,
-        promoted_piece: None,
-    });
+    // let game = game.apply_move(Move {
+    //     from: 32,
+    //     to: 33,
+    //     piece_color: game.active_color,
+    //     promoted_piece: None,
+    // });
+    // let game = game.apply_move(Move {
+    //     from: 47,
+    //     to: 42,
+    //     piece_color: game.active_color,
+    //     promoted_piece: None,
+    // });
+    // let game = game.apply_move(Move {
+    //     from: 33,
+    //     to: 26,
+    //     piece_color: game.active_color,
+    //     promoted_piece: None,
+    // });
+    // let game = game.apply_move(Move {
+    //     from: 35,
+    //     to: 27,
+    //     piece_color: game.active_color,
+    //     promoted_piece: None,
+    // });
     // println!("Mask {}", game.masks.black_checkmask);
     // println!("{}", game.pieces.w_knight);
     // println!("{}, {:?}", new_game.pieces.white_pieces, new_game.pieces);
@@ -1961,8 +1974,8 @@ fn main() {
     // let now = SystemTime::now();
     // let nodes = game.perft(2);
     // println!("Node Count: {}", nodes);
-    game.divide(2);
-    println!("{}", game.masks.black_checkmask);
+    game.divide(6);
+    // println!("{}", game.masks.black_checkmask);
     // println!("{:?}", game.en_passant);
     // println!("{}", game.masks.black_king_danger);
     // println!("Moves: {:?}", game.king_moves(game.active_color).len());
@@ -1980,3 +1993,4 @@ fn main() {
 //todo
 //fix movegen bugs
 //fix negamax not working
+// fix en-pessant pin
