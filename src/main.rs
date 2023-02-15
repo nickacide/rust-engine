@@ -17,7 +17,6 @@ pub enum Color {
     White,
     Black,
 }
-//first time using trait! pretty useful tbh
 trait Invert {
     fn invert(&self) -> Color;
 }
@@ -68,8 +67,6 @@ pub enum Direction {
     NorthWest,
 }
 
-// const not_h: u64 = 0x7f7f7f7f7f7f7f7f;
-// const not_a: u64 = 0xfefefefefefefefe;
 pub const HORIZONTAL_LOOKUP: [u64; 8] = [
     0xff,
     0xff00,
@@ -85,22 +82,6 @@ const WHITE_QUEENSIDE: u64 = 0xc;
 const WHITE_KINGSIDE: u64 = 0x60;
 const BLACK_QUEENSIDE: u64 = 0xc00000000000000;
 const BLACK_KINGSIDE: u64 = 0x6000000000000000;
-// pub enum MoveType {
-//     Promotion,
-//     EnPassant,
-//     Check,
-//     Capture,
-//     Normal,
-// }
-// struct Move {
-//     promoted_piece: Option<>
-// }
-// pub struct KingMask {
-//     check_mask: u64,
-//     pin_mask: u64,
-//     checkers: u64,
-//     valid_moves: u64,
-// }
 #[derive(Debug, Clone, Copy)]
 pub struct Move {
     from: usize,
@@ -228,30 +209,6 @@ impl Pieces {
             for sq in 0..rank.len() {
                 let square = rank.as_bytes()[sq] as char;
                 let idx = (7 - rank_count) * 8 + sq + offset;
-                // println!("{} {}", idx, offset);
-                // let piece_type = piece_type(square);
-                // let color = piece_color(square);
-                // print!("{}", square);
-                // let mut bitboard = 0;
-                // if !square.is_numeric() {
-                //     bitboard = match square {
-                //         'K' => w_king,
-                //         'Q' => w_queen,
-                //         'R' => w_rook,
-                //         'B' => w_bishop,
-                //         'N' => w_knight,
-                //         'P' => w_pawn,
-                //         'k' => b_king,
-                //         'q' => b_queen,
-                //         'r' => b_rook,
-                //         'b' => b_bishop,
-                //         'n' => b_knight,
-                //         'p' => b_pawn,
-                //         _ => panic!("How did we get here?"),
-                //     };
-                // } else {
-                //     num_offset += square as usize;
-                // }
                 match square {
                     'K' => {
                         set_bit(&mut w_king, idx, true);
@@ -321,10 +278,6 @@ impl Pieces {
         }
         let white_pieces = w_king | w_queen | w_rook | w_bishop | w_knight | w_pawn;
         let black_pieces = b_king | b_queen | b_rook | b_bishop | b_knight | b_pawn;
-        // println!(
-        //     "White Pieces: {}; Black Pieces: {}",
-        //     white_pieces, black_pieces
-        // );
         Pieces {
             w_king,
             w_queen,
@@ -710,15 +663,6 @@ impl GameState {
         let mut new_gamestate = self.clone();
         let captured = new_gamestate.pieces.piece_type_lookup[piece_move.to];
         let captured_color = new_gamestate.pieces.color_lookup[piece_move.to];
-        // println!("{:?}", self.pieces.piece_type_lookup);
-        // println!("{:?}", captured);
-        // println!(
-        //     "wtf {:?} {}",
-        //     new_gamestate.pieces.piece_type_lookup[33], piece_move.to
-        // );
-        // if captured != None {
-        //     println!("{} captured", format_move(piece_move.to));
-        // }
         if captured != Some(PieceType::Pawn) {
             new_gamestate.en_passant = None;
         }
@@ -755,17 +699,9 @@ impl GameState {
             }
             Some(PieceType::Pawn) => {
                 if captured_color == Some(Color::White) {
-                    // if Some(piece_move.to) == new_gamestate.en_passant {
-                    //     new_gamestate.pieces.w_pawn &= !(1 << piece_move.to << 8);
-                    // } else {
                     new_gamestate.pieces.w_pawn &= !(1 << piece_move.to);
-                    // }
                 } else {
-                    //     if Some(piece_move.to) == new_gamestate.en_passant {
-                    //         new_gamestate.pieces.b_pawn &= !(1 << piece_move.to >> 8);
-                    //     } else {
                     new_gamestate.pieces.b_pawn &= !(1 << piece_move.to);
-                    //     }
                 }
             }
         };
@@ -1137,10 +1073,6 @@ impl GameState {
         new_gamestate.pieces.black_pieces = pieces.black_pieces;
         new_gamestate.empty =
             !(new_gamestate.pieces.white_pieces | new_gamestate.pieces.black_pieces);
-        // println!(
-        //     "{:?}",
-        //     new_gamestate.pieces.piece_type_lookup[piece_move.to]
-        // );
         new_gamestate
     }
     fn perft(&self, depth: usize) -> u64 {
@@ -1159,19 +1091,12 @@ impl GameState {
         for piece_move in moves {
             let new_board = self.apply_move(piece_move);
             let move_nodes = new_board.perft(depth - 1);
-            // let new_moves = new_board
-            //     .moves(new_board.active_color)
-            //     .iter()
-            //     .map(|&m| m.display())
-            //     .collect::<Vec<_>>();
-            // if new_moves.len() != 20 {
             println!(
                 "{}{}: {}",
                 format_move(piece_move.from),
                 format_move(piece_move.to),
                 move_nodes
             );
-            // }
         }
         let nodes = self.perft(depth);
         println!("\nNodes searched: {}", nodes);
@@ -1487,7 +1412,6 @@ impl GameState {
                         let king_file = (self.pieces.w_king.trailing_zeros() % 8) as i8;
                         let rank = (current_piece / 8) as i8;
                         let file = (current_piece % 8) as i8;
-                        // println!("KR {} KF {} R {} F {}", king_rank, king_file, rank, file);
                         if king_rank == rank {
                             movemask &= self.masks.white_pinmask.h;
                         } else if king_file == file {
@@ -1510,7 +1434,6 @@ impl GameState {
                         }
                     }
                     if let Some(sq) = self.en_passant {
-                        // println!("sq {}", sq.trailing_zeros());
                         if self.white_pawn_lookup[current_piece as usize] & (1u64 << sq) > 0 {
                             let potential_white_checkers =
                                 HORIZONTAL_LOOKUP[4] & (self.pieces.b_queen | self.pieces.b_rook);
@@ -1519,7 +1442,7 @@ impl GameState {
                                 | west_attacks(self.pieces.w_king, empty))
                                 & potential_white_checkers;
                             if white_checkers == 0 {
-                                bb_moves |= 1u64 << sq; //& self.masks.white_pinmask.v;
+                                bb_moves |= 1u64 << sq;
                             }
                         }
                         if (self.masks.white_checkers & self.pieces.b_pawn).count_ones() == 1
@@ -1527,8 +1450,8 @@ impl GameState {
                                 + 8) as usize
                                 == sq
                         {
-                            bb_moves |= 1u64 << sq; // & self.masks.white_pinmask.v;
-                            movemask |= 1u64 << sq; // & self.masks.white_pinmask.v;
+                            bb_moves |= 1u64 << sq;
+                            movemask |= 1u64 << sq;
                         }
                     }
                     bb_moves &= movemask;
@@ -1596,12 +1519,6 @@ impl GameState {
                     }
                     let mut bb_moves =
                         self.black_pawn_lookup[current_piece as usize] & self.pieces.white_pieces;
-                    // println!(
-                    //     "{} {} {}",
-                    //     1u64 << current_piece,
-                    //     self.empty,
-                    //     (1u64 << current_piece) >> 8 & self.empty > 0
-                    // );
                     if (1u64 << current_piece) >> 8 & self.empty > 0 {
                         bb_moves |= (1u64 << current_piece) >> 8;
                         if (1u64 << current_piece) >> 16 & self.empty > 0 && current_piece >> 3 == 6
@@ -1702,42 +1619,6 @@ impl GameState {
         }
         move_list
     }
-    // fn fen(&self) -> String {
-    //     let mut fen_string = String::new();
-    //     for rank in 0..8 {
-    //         let mut open_file_count = 0;
-    //         for file in 0..8 {
-    //             let piece = self.pieces.piece_type_lookup[rank * 8 + file];
-    //             let color = self.pieces.color_lookup[rank * 8 + file];
-    //             if piece == None {
-    //                 open_file_count += 1;
-    //             } else {
-    //                 let mut piece_str = match piece.unwrap() {
-    //                     PieceType::King => "k",
-    //                     PieceType::Queen => "q",
-    //                     PieceType::Rook => "r",
-    //                     PieceType::Bishop => "b",
-    //                     PieceType::Knight => "n",
-    //                     PieceType::Pawn => "p",
-    //                 };
-    //                 if color == Some(Color::White) {
-    //                     piece_str = piece_str.to_uppercase().as_str();
-    //                 }
-    //                 fen_string.push_str(piece_str);
-    //             }
-    //         }
-    //         if rank != 7 {
-    //             fen_string.push_str("/");
-    //             open_file_count = 0;
-    //         }
-    //     }
-    //     // for index in 0..64 {
-    //     //     let piece = self.pieces.piece_type_lookup[index];
-    //     //     let color = self.pieces.color_lookup[index];
-
-    //     // }
-    //     todo!()
-    // }
     fn negamax(&self, depth: usize, color: Color) -> (Move, f32) {
         let mut best_score = f32::NEG_INFINITY;
         let mut best_move = self.moves(color)[0];
@@ -1888,14 +1769,8 @@ pub fn generate_slide_lookup(key: u64) -> u64 {
     let rank2 = index2 / 8;
     let file2 = index2 % 8;
     if rank1 - rank2 == file2 - file1 {
-        // println!("a1h8");
-        //file1 > file2
         for file in file2..file1 {
-            // bitboard |= 1 << 4;
-            // let rank = 8 - (file - file2 + rank1);
             bitboard |= 1 << (index1 + (file - file2) * 7);
-            // let index = 8 * file + file;
-            // println!("{}", index);
         }
     } else if rank1 - rank2 == file1 - file2 {
         // println!("h1a8");
@@ -1903,17 +1778,11 @@ pub fn generate_slide_lookup(key: u64) -> u64 {
             bitboard |= 1 << (index1 + (file - file1) * 9);
         }
     } else if rank1 == rank2 {
-        //Horizontal
-        // println!("horizontal");
         for file in file1..file2 {
-            // println!("{}", index1 + (file - file1));
             bitboard |= 1 << (index1 + file - file1);
         }
     } else if file1 == file2 {
-        //Vertical
-        // println!("vertical");
         for rank in rank1..rank2 {
-            // println!("{}", index1 + (rank - rank1) * 8);
             bitboard |= 1 << (index1 + (rank - rank1) * 8);
         }
     } else {
@@ -1921,14 +1790,21 @@ pub fn generate_slide_lookup(key: u64) -> u64 {
     }
     bitboard
 }
-fn main() {
+fn main() {}
+//notes
+//undefended_pieces = white_pieces - (white_space & white_pieces)
+//award +-0.5 for the bishop pair
+
+//todo
+//fix movegen bugs
+//fix negamax not working
+// fix en-pessant pin
+
+#[cfg(test)]
+fn test_divide() {
     // let fen = "3k4/3p4/8/K1P4r/8/8/8/8 b - - 0 1".to_owned();
     // let game: GameState = GameState::new(fen);
     let game = GameState::default();
-    // let moves = game.moves(game.active_color);
-    // game = game.apply_move(moves[0]);
-    // let color = game.active_color;
-    // let king_moves = game.king_moves(color);
     // let game = game.apply_move(Move {
     //     from: 39,
     //     to: 47,
@@ -1960,37 +1836,5 @@ fn main() {
     //     promoted_piece: None,
     // });
     // println!("Mask {}", game.masks.black_checkmask);
-    // println!("{}", game.pieces.w_knight);
-    // println!("{}, {:?}", new_game.pieces.white_pieces, new_game.pieces);
-    // println!(
-    //     "KING {} QUEEN {} ROOK {} BISHOP {} KNIGHT {} PAWN {:?}",
-    //     game.king_moves(color).len(),
-    //     game.queen_moves(color).len(),
-    //     game.rook_moves(color).len(),
-    //     game.bishop_moves(color).len(),
-    //     game.knight_moves(color).len(),
-    //     game.pawn_moves(color).len()
-    // );
-    // let now = SystemTime::now();
-    // let nodes = game.perft(2);
-    // println!("Node Count: {}", nodes);
     game.divide(6);
-    // println!("{}", game.masks.black_checkmask);
-    // println!("{:?}", game.en_passant);
-    // println!("{}", game.masks.black_king_danger);
-    // println!("Moves: {:?}", game.king_moves(game.active_color).len());
-    // let (best_move, score) = game.negamax(3, game.active_color);
-    // println!("Score: {}, Best Move: {:?}", score, best_move);
-    // let since = now.elapsed().expect("wtf").as_millis() as u64;
-    // println!("Time taken: {:?}ms", since);
-    // println!("{}", format_move(0));
-    // println!("Nodes per Second: {}", nodes / since * 1000);
 }
-//notes
-//undefended_pieces = white_pieces - (white_space & white_pieces)
-//award +-0.5 for the bishop pair
-
-//todo
-//fix movegen bugs
-//fix negamax not working
-// fix en-pessant pin
